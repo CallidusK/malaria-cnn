@@ -102,10 +102,19 @@ def make_class_folder(class_folder: Path, is_infected: bool, rng: random.Random)
     """Fill one class folder (e.g. .../Parasitized) with fake cell images."""
     class_folder.mkdir(parents=True, exist_ok=True)
 
+    # Like the real data: infected patients' slides contain BOTH infected and
+    # healthy cells, while healthy volunteers only have healthy cells. So
+    # infected cells only go to the first patients; the last few patients
+    # (the "healthy volunteers") only ever get healthy cells.
+    num_infected_patients = config.FAKE_NUM_PATIENTS - config.FAKE_NUM_HEALTHY_ONLY_PATIENTS
+    if is_infected:
+        patients_for_this_class = num_infected_patients
+    else:
+        patients_for_this_class = config.FAKE_NUM_PATIENTS
+
     for cell_number in range(config.FAKE_IMAGES_PER_CLASS):
-        # Hand out cells to patients in turn (1, 2, ..., 8, 1, 2, ...), so every
-        # patient has cells of both classes, like real infected patients' slides.
-        patient_number = cell_number % config.FAKE_NUM_PATIENTS + 1
+        # Hand out cells to patients in turn: 1, 2, 3, ..., then back to 1.
+        patient_number = cell_number % patients_for_this_class + 1
 
         image_size = rng.randint(config.FAKE_IMAGE_MIN_SIZE, config.FAKE_IMAGE_MAX_SIZE)
         image = draw_fake_cell(image_size, is_infected, rng)
@@ -115,15 +124,19 @@ def make_class_folder(class_folder: Path, is_infected: bool, rng: random.Random)
     (class_folder / "Thumbs.db").write_bytes(b"not an image")
 
 
-def main() -> None:
-    """Delete any old fake dataset and create a fresh one."""
+def create_fake_dataset(output_dir: Path) -> None:
+    """
+    Delete any old fake dataset in output_dir and create a fresh one.
+
+    The tests call this with a temporary folder, so they never touch data/fake.
+    """
     # Same seed every run, so the fake images are identical every time.
     rng = random.Random(config.RANDOM_SEED)
 
-    if config.FAKE_DATA_DIR.exists():
-        shutil.rmtree(config.FAKE_DATA_DIR)
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
 
-    top_folder = config.FAKE_DATA_DIR / "cell_images"
+    top_folder = output_dir / "cell_images"
     make_class_folder(top_folder / "Uninfected", is_infected=False, rng=rng)
     make_class_folder(top_folder / "Parasitized", is_infected=True, rng=rng)
 
@@ -132,9 +145,16 @@ def main() -> None:
     shutil.copytree(top_folder / "Uninfected", nested_duplicate / "Uninfected")
     shutil.copytree(top_folder / "Parasitized", nested_duplicate / "Parasitized")
 
+
+def main() -> None:
+    """Create the fake dataset in the folder set in config.py."""
+    create_fake_dataset(config.FAKE_DATA_DIR)
+
     total_images = 2 * config.FAKE_IMAGES_PER_CLASS
-    print(f"Created {total_images} fake images in {top_folder}")
-    print(f"(plus a nested duplicate copy in {nested_duplicate} and Thumbs.db junk files)")
+    print(f"Created {total_images} fake images in {config.FAKE_DATA_DIR / 'cell_images'}")
+    print("(plus a nested duplicate copy in cell_images/cell_images/ and Thumbs.db junk files)")
+    print(f"{config.FAKE_NUM_PATIENTS} fake patients, "
+          f"{config.FAKE_NUM_HEALTHY_ONLY_PATIENTS} of them with healthy cells only")
 
 
 if __name__ == "__main__":

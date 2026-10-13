@@ -65,3 +65,54 @@ Each note points to the file (and function) where the idea lives in the code.
 ### Regular expressions
 **What:** a mini-language for describing text patterns. `^(.+?)_?thinF` means "from the start, capture the shortest text before an optional underscore and the word thinF".
 **Where:** notebook section 10, `CODE_PATTERN`.
+
+---
+
+## Phase 2: Data pipeline
+
+### Tensors
+**What:** a tensor is a multi-dimensional array of numbers, PyTorch's basic data type. One colour image is a 3D tensor: `(channels, height, width)` = `(3, 128, 128)`.
+**Analogy:** a stack of three spreadsheets, one each for red, green and blue, where each cell holds one pixel's brightness.
+**Where:** `src/data.py` → `build_train_transform()`, the `transforms.ToTensor()` step.
+
+### Batches
+**What:** a group of images processed together. A batch of 64 images is a 4D tensor: `(64, 3, 128, 128)` = (images, colour channels, height, width).
+**Why:** a GPU is fastest when it does many images at once, and averaging the error over a batch gives a steadier signal for learning than one image alone.
+**Where:** `src/data.py` → `get_dataloaders()`. The batch size is `BATCH_SIZE` in `src/config.py`.
+
+### Train, validation and test sets: why three?
+**Analogy:** a student preparing for an exam.
+- **Train** = the textbook exercises. The model learns from these.
+- **Validation** = practice exams. We use them to make decisions: which epoch was best, which threshold to use. Because we make decisions with them, they slowly stop being "unseen".
+- **Test** = the real exam, sat exactly once at the end. It's only honest if no decision was ever based on it.
+
+**Where:** `src/data.py` → `split_by_patient()`. Sizes are `TRAIN_FRACTION`, `VAL_FRACTION` and `TEST_FRACTION` in `src/config.py`.
+
+### Stratified group split
+**What:** splitting so that (1) all of one patient's cells stay together (**group**), and (2) every split has a similar infected/healthy mix (**stratified**).
+**Why both:** grouping prevents patient leakage. Stratifying matters because healthy volunteers only have healthy cells, so a purely random patient split could give a test set with very few infected cells. The test score would then be noisy, and recall would be measured on only a handful of cases.
+**Where:** `src/data.py` → `hold_out_by_patient()` (uses scikit-learn's `StratifiedGroupKFold`) and `check_split_is_safe()`, which refuses any split with leakage or a missing class.
+
+### Saving the split (`splits.csv`)
+**What:** the split is made once, written to a CSV file, and reloaded on every later run.
+**Why:** training, evaluation and the ResNet18 comparison must all be judged on the *same* test patients, otherwise comparing their scores is meaningless.
+**Where:** `src/data.py` → `load_or_create_splits()`. Real split: `splits/splits.csv` (committed to git). Fake split: `data/fake/splits.csv`.
+
+### Data augmentation
+**What:** small random changes to training images every time they're loaded: flips, rotations and slight colour changes.
+**Why:** it's free extra data. A cell rotated 90° is still the same cell, and stain colour really does vary between labs. It also makes memorising individual images harder, which fights overfitting.
+**Why only on training images:** validation and test measure how the model does on *real* cells. Randomly changing them would make the score noisy and less honest.
+**Where:** `src/data.py` → `build_train_transform()` vs `build_eval_transform()`. Strengths are set in `src/config.py` (`MAX_ROTATION_DEGREES`, `COLOUR_JITTER_*`).
+
+### Normalisation
+**What:** shifting and scaling each colour channel so the values are centred around 0 (roughly -2 to +2) instead of 0 to 1.
+**Why:** networks learn faster and more stably when inputs are centred. We use ImageNet's mean and std because ResNet18 needs exactly those, and using the same for SimpleCNN keeps both models' inputs identical.
+**Where:** `transforms.Normalize(...)` in `src/data.py`; the values are `NORMALISE_MEAN` and `NORMALISE_STD` in `src/config.py`.
+
+### Dataset and DataLoader
+**What:** a `Dataset` knows how to load **one** image and its label (`MalariaDataset.__getitem__`). A `DataLoader` asks the Dataset for many images, stacks them into a batch, and shuffles the order each epoch.
+**Analogy:** the Dataset is a librarian who fetches one book on request; the DataLoader is a trolley that collects 64 books and wheels them over to you.
+**Where:** `src/data.py` → `MalariaDataset` and `get_dataloaders()`.
+
+### Tests that can fail
+**What:** `tests/test_data.py` checks the pipeline automatically (`pytest`). We confirmed the tests are real by deliberately breaking the patient split: the leakage tests failed, as they should.

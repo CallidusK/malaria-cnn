@@ -44,6 +44,12 @@ else:
 # Small, final results worth committing to git (plots, metrics.json).
 RESULTS_DIR: Path = PROJECT_ROOT / "results"
 
+# The train/val/test split, saved once and reused by every later step, so
+# training, evaluation and the ResNet18 comparison all use the SAME test patients.
+# The real split is committed to git; the fake one is regenerated with the fake data.
+SPLITS_CSV: Path = PROJECT_ROOT / "splits" / "splits.csv"
+FAKE_SPLITS_CSV: Path = FAKE_DATA_DIR / "splits.csv"
+
 # ---------------------------------------------------------------------------
 # Classes and labels
 # ---------------------------------------------------------------------------
@@ -89,6 +95,34 @@ RESNET_IMAGE_SIZE: int = 224      # ResNet18 was pretrained on 224x224 images
 
 # Number of colour channels: red, green, blue.
 NUM_CHANNELS: int = 3
+
+# Normalisation: shift and scale each colour channel so values sit around 0
+# instead of 0..1. Networks train faster and more stably on centred inputs.
+# These are the average (mean) and spread (std) of red, green and blue over the
+# ImageNet photo collection. ResNet18 REQUIRES them, because it was pretrained
+# on images normalised this way; we use them for SimpleCNN too, so both models
+# see identically prepared images.
+NORMALISE_MEAN: tuple[float, float, float] = (0.485, 0.456, 0.406)
+NORMALISE_STD: tuple[float, float, float] = (0.229, 0.224, 0.225)
+
+# ---------------------------------------------------------------------------
+# Data augmentation (training images only)
+# ---------------------------------------------------------------------------
+
+# Augmentation = random small changes to training images, so the model sees
+# a slightly different version of each cell every epoch.
+
+# A cell has no "up", so any rotation is a realistic new view. 180 means
+# "rotate by a random angle between -180 and +180 degrees".
+MAX_ROTATION_DEGREES: float = 180.0
+
+# Stain colour and lighting vary between labs and microscopes. Small random
+# colour changes teach the model not to depend on one exact shade.
+# Each value is the maximum change, as a fraction (0.1 = up to 10%).
+COLOUR_JITTER_BRIGHTNESS: float = 0.1
+COLOUR_JITTER_CONTRAST: float = 0.1
+COLOUR_JITTER_SATURATION: float = 0.1
+COLOUR_JITTER_HUE: float = 0.02  # hue shifts colours around the colour wheel; keep it tiny so purple stays purple
 
 # ---------------------------------------------------------------------------
 # Training
@@ -147,6 +181,9 @@ TARGET_RECALL: float = 0.98
 SMOKE_TEST_EPOCHS: int = 1
 
 FAKE_IMAGES_PER_CLASS: int = 40
-FAKE_NUM_PATIENTS: int = 8       # enough patients to split into train/val/test
+# Enough patients that every split (train/val/test) gets several of them.
+FAKE_NUM_PATIENTS: int = 20
+# Like the real data, some patients are healthy volunteers with no infected cells.
+FAKE_NUM_HEALTHY_ONLY_PATIENTS: int = 4
 FAKE_IMAGE_MIN_SIZE: int = 50    # real cell images also vary in size,
 FAKE_IMAGE_MAX_SIZE: int = 140   # so the fake ones do too
