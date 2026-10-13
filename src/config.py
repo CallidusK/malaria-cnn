@@ -151,6 +151,28 @@ LR_SCHEDULER_FACTOR: float = 0.5  # new learning rate = old learning rate x 0.5
 # so the model can't rely too heavily on any single one.
 DROPOUT_PROBABILITY: float = 0.3
 
+# SimpleCNN: how many filters (feature detectors) each of its 4 blocks has.
+# Early blocks find simple things (edges, colour patches); later blocks combine
+# them into complex things (a purple blob inside a round cell). Later blocks get
+# more filters because there are more combinations worth detecting.
+SIMPLE_CNN_CHANNELS: tuple[int, int, int, int] = (32, 64, 128, 256)
+
+# Size of the square window each convolution filter looks at, in pixels.
+CONV_KERNEL_SIZE: int = 3
+
+# Max pooling shrinks height and width by this factor in every block.
+POOL_SIZE: int = 2
+
+# ---------------------------------------------------------------------------
+# Overfit-one-batch sanity check (Phase 3)
+# ---------------------------------------------------------------------------
+
+# Train repeatedly on ONE small batch. A working model and training loop
+# can memorise it, driving the loss close to zero. If it can't, something is broken.
+OVERFIT_BATCH_SIZE: int = 16
+OVERFIT_STEPS: int = 100
+OVERFIT_TARGET_LOSS: float = 0.05  # "close to zero" (random guessing scores about 0.69)
+
 # How many CPU worker processes load images in the background while the GPU
 # trains. 0 = load in the main process (slower, but simplest and safest locally).
 NUM_DATA_WORKERS: int = 2 if IS_ON_KAGGLE else 0

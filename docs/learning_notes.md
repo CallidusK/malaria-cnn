@@ -116,3 +116,68 @@ Each note points to the file (and function) where the idea lives in the code.
 
 ### Tests that can fail
 **What:** `tests/test_data.py` checks the pipeline automatically (`pytest`). We confirmed the tests are real by deliberately breaking the patient split: the leakage tests failed, as they should.
+
+---
+
+## Phase 3: Our own CNN and the training loop
+
+### Convolution, filters and feature maps
+**What:** a convolution slides a small filter (3×3 pixels) across the image. At each position it multiplies the filter's 9 numbers by the pixels underneath and adds them up. The result is a **feature map**: an image showing *where* that filter's pattern appears.
+**Analogy:** a stencil you slide over a picture, which glows wherever the picture underneath matches its shape.
+**Key point:** we never design the filters. They start random, and training shapes them into useful detectors (edges, then blobs, then "purple blob inside a round cell").
+**Where:** `src/models.py` → `ConvBlock.__init__()`, `self.conv`.
+
+### Pooling
+**What:** max pooling keeps the largest value in every 2×2 square, halving height and width.
+**Why:** less computation, a little tolerance to small shifts, and each later filter "sees" a larger area of the cell.
+**Where:** `ConvBlock`, `self.pool`. Follow the shrinking shapes in the `SimpleCNN.forward()` comments: 128 → 64 → 32 → 16 → 8.
+
+### ReLU
+**What:** keeps positive numbers and turns negative ones into 0.
+**Why:** without a bend like this, stacking layers would be no more powerful than a single layer (a chain of straight lines is still a straight line).
+**Where:** `ConvBlock`, `self.relu`.
+
+### BatchNorm
+**What:** rescales each feature map to a steady range (average ~0, spread ~1).
+**Why:** it keeps the numbers flowing through the network from growing or shrinking out of control, which makes training faster and more stable.
+**A subtlety we saw:** in training mode it uses the current batch's statistics; in evaluation mode it uses long-run averages built up over training. With very few training steps those averages aren't ready yet. That's why, on the fake data (1 batch per epoch), validation looked broken until we tried 8 batches per epoch. The real data has ~300 batches per epoch.
+**Where:** `ConvBlock`, `self.batch_norm`.
+
+### Global average pooling and dropout
+**Global average pooling:** averages each of the 256 final feature maps to one number: "how strongly does pattern k appear anywhere in this cell?" It also lets the model accept any image size.
+**Dropout:** during training, randomly switches off 30% of those 256 numbers, so the decision can't hinge on any single feature. It's switched off automatically in `model.eval()`.
+**Where:** `SimpleCNN.__init__()`, `self.global_pool` and `self.dropout`.
+
+### Logits and sigmoid
+**What:** the model outputs one raw score per image, the **logit** (any number, from -∞ to +∞). The **sigmoid** function squashes it into a probability between 0 and 1. A logit of 0 means 50%, positive means "probably infected", negative means "probably healthy".
+**Where:** `SimpleCNN.forward()` returns logits; `src/train.py` → `validate()` applies `torch.sigmoid()`.
+
+### Loss function
+**What:** one number measuring how wrong the predictions are. We use **binary cross-entropy** (`BCEWithLogitsLoss`), the standard for yes/no questions. Being confidently wrong is punished heavily.
+**Useful landmark:** random 50/50 guessing gives a loss of about **0.69**. A loss stuck there means the model isn't learning (PLAN.md Section 7).
+**Where:** `src/train.py` → `train_model()`, `loss_function`.
+
+### Gradient descent and the 5 training steps
+**Analogy:** walking downhill in fog. You can't see the valley, but you can feel which way the ground slopes under your feet (the **gradient**) and take a step that way. The **learning rate** is how big each step is.
+**The 5 steps, every batch** (`src/train.py` → `train_one_epoch()`):
+1. **Forward:** the model scores the images.
+2. **Loss:** measure how wrong the scores are.
+3. **Zero grad:** clear the previous batch's gradients (PyTorch adds them up otherwise).
+4. **Backward:** calculate the gradient for every weight.
+5. **Step:** the optimiser (Adam) nudges every weight downhill.
+
+### Epochs, learning rate scheduler and early stopping
+**Epoch:** one full pass over all training images.
+**Scheduler** (`ReduceLROnPlateau`): when validation loss stalls for 2 epochs, it halves the learning rate. Smaller steps help settle into the bottom of the valley.
+**Early stopping:** if validation loss hasn't improved for 4 epochs, stop. We always keep the checkpoint from the best epoch, not the last one.
+**Where:** `src/train.py` → `train_model()`. Settings: `LR_SCHEDULER_*`, `EARLY_STOPPING_PATIENCE` and `MAX_EPOCHS` in `src/config.py`.
+
+### Overfitting vs underfitting
+**Overfitting:** the model memorises the training images instead of learning general patterns. **On the curves:** training loss keeps falling while validation loss turns upward, opening a widening gap.
+**Underfitting:** the model hasn't learned enough. **On the curves:** both losses stay high.
+**Where:** `src/train.py` → `plot_history()` draws both losses side by side for exactly this check.
+
+### The overfit-one-batch sanity check
+**What:** train on the same 16 images 100 times. A working model *must* be able to memorise them (loss → ~0).
+**Why:** it catches broken code (wrong labels, a disconnected layer, a learning rate of 0) in seconds, before you spend an hour of GPU time. We confirmed it works by setting the learning rate to 0: the test failed, as it should.
+**Where:** `src/train.py` → `overfit_one_batch()`; run it with `python -m src.train --overfit-batch`. The test is in `tests/test_models.py`.
