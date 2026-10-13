@@ -1,0 +1,7 @@
+# Extras that Kaggle notebooks don't have preinstalled. Install in a Kaggle cell with:
+#     !pip install -q -r requirements-kaggle.txt
+#
+# Do NOT add torch, torchvision, numpy, pandas, scikit-learn or matplotlib here:
+# Kaggle already has them, and reinstalling torch can break its GPU setup.
+
+grad-cam>=1.5         # Grad-CAM heatmaps (imported as pytorch_grad_cam)

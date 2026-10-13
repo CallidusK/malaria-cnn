@@ -1,0 +1,18 @@
+# Local dependencies (laptop). Install with:
+#     pip install -r requirements.txt
+#
+# These are minimum versions for now. PLAN.md says to pin exact versions after
+# checking what Kaggle uses (run `pip freeze` in a Kaggle cell, Phase 4),
+# so the laptop and Kaggle run the same library versions.
+
+torch>=2.2            # deep learning: tensors, layers, training
+torchvision>=0.17     # image transforms and the pretrained ResNet18
+numpy>=1.26           # fast number arrays
+pandas>=2.1           # tables of file paths, labels and patient IDs
+Pillow>=10.0          # opens .png image files
+scikit-learn>=1.3     # patient-grouped splitting and evaluation metrics
+matplotlib>=3.8       # plots: training curves, confusion matrix, image grids
+tqdm>=4.66            # progress bars
+grad-cam>=1.5         # Grad-CAM heatmaps (imported as pytorch_grad_cam)
+pytest>=8.0           # automatic tests
+jupyter>=1.0          # open the notebooks locally
