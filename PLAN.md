@@ -189,14 +189,15 @@ Each phase lists: **Goal**, **What gets built**, **Key decisions**, **Concepts y
 
 **What gets built:** `src/data.py`:
 - `find_images(data_dir)` → a pandas table: `path, label, patient_id`, deduplicated, `.png` only.
-- `split_by_patient(table)` → train / val / test at roughly **70 / 15 / 15**, using scikit-learn's `GroupShuffleSplit` so **no patient appears in two splits**. Print class counts per split.
+- `split_by_patient(table)` → train / val / test at roughly **70 / 15 / 15**, using scikit-learn's `StratifiedGroupKFold` so **no patient appears in two splits** *and* each split keeps a similar Parasitized/Uninfected balance (a plain `GroupShuffleSplit` can come out lopsided, because healthy patients only contribute Uninfected cells). Print class counts per split.
+- Save the split to **`splits.csv`** (`path, label, patient_id, split`) and reuse it in every later phase, so training, evaluation and the ResNet18 comparison all use exactly the same test patients.
 - `MalariaDataset` (a PyTorch `Dataset`) that loads one image and its label.
 - Transforms:
   - **Train:** resize → random horizontal + vertical flip → random rotation (cells have no "up", so rotating is free extra data) → mild colour jitter (stain colour varies between labs) → to tensor → normalise.
   - **Val/Test:** resize → to tensor → normalise. **No augmentation** here; we test on clean images.
 - `get_dataloaders(...)` returns the three `DataLoader`s.
 
-`tests/test_data.py`: runs on fake data; checks no patient overlap between splits, correct tensor shape, labels are 0/1.
+`tests/test_data.py`: runs on fake data; checks no patient overlap between splits, every split contains both classes, correct tensor shape, labels are 0/1.
 
 **Key decisions:**
 - Image size: **128×128** for our own CNN, **224×224** for ResNet18 (that's what it was pretrained on). Both live in `config.py`.

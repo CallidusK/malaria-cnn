@@ -33,6 +33,11 @@ BACKGROUND_COLOUR = (0, 0, 0)        # real cell images have a black background
 CELL_COLOUR = (220, 150, 160)        # pinkish, like a stained red blood cell
 PARASITE_COLOUR = (90, 40, 110)      # dark purple, like a stained parasite
 
+# Each fake cell's colour is nudged by up to this much per channel, like stain
+# colour varying between slides. Without it, two plain healthy cells of the same
+# size would be pixel-identical, i.e. accidental duplicates.
+MAX_COLOUR_SHIFT = 20
+
 # How much of the image the cell fills, as a fraction of the image's width.
 CELL_FRACTION_OF_IMAGE = 0.8
 # How big the parasite is, as a fraction of the cell's width.
@@ -44,11 +49,17 @@ def draw_fake_cell(image_size: int, is_infected: bool, rng: random.Random) -> Im
     image = Image.new("RGB", (image_size, image_size), BACKGROUND_COLOUR)
     draw = ImageDraw.Draw(image)
 
-    # The cell: a circle centred in the image.
+    # The cell: a circle centred in the image, in a slightly random shade of pink.
+    red, green, blue = CELL_COLOUR
+    cell_colour = (
+        red + rng.randint(-MAX_COLOUR_SHIFT, MAX_COLOUR_SHIFT),
+        green + rng.randint(-MAX_COLOUR_SHIFT, MAX_COLOUR_SHIFT),
+        blue + rng.randint(-MAX_COLOUR_SHIFT, MAX_COLOUR_SHIFT),
+    )
     cell_diameter = image_size * CELL_FRACTION_OF_IMAGE
     margin = (image_size - cell_diameter) / 2
     cell_box = (margin, margin, margin + cell_diameter, margin + cell_diameter)
-    draw.ellipse(cell_box, fill=CELL_COLOUR)
+    draw.ellipse(cell_box, fill=cell_colour)
 
     if is_infected:
         # The parasite: a small circle at a random spot inside the cell.
