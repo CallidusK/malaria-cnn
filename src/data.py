@@ -145,7 +145,11 @@ def find_images(data_dir: Path) -> pd.DataFrame:
         })
 
     if not rows:
-        raise FileNotFoundError(f"No labelled .png images found under {data_dir}")
+        raise FileNotFoundError(
+            f"No labelled .png images found under {data_dir}. "
+            "On Kaggle: is the malaria dataset attached (Add Input)? "
+            "Locally: did you run `python -m src.make_fake_data`?"
+        )
 
     table = pd.DataFrame(rows)
     print(f"Found {len(table)} labelled .png files under {data_dir}")
