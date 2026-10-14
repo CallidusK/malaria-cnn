@@ -23,3 +23,6 @@ outputs/
 .DS_Store
 .vscode/
 .idea/
+
+# The code zip uploaded to Kaggle (rebuilt from git with `git archive`, see notebooks/02_run_on_kaggle.ipynb)
+*.zip

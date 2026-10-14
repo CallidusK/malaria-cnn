@@ -174,8 +174,12 @@ OVERFIT_STEPS: int = 100
 OVERFIT_TARGET_LOSS: float = 0.05  # "close to zero" (random guessing scores about 0.69)
 
 # How many CPU worker processes load images in the background while the GPU
-# trains. 0 = load in the main process (slower, but simplest and safest locally).
-NUM_DATA_WORKERS: int = 2 if IS_ON_KAGGLE else 0
+# trains. On Kaggle, one per CPU core, so the GPU isn't left waiting for images.
+# Locally, 0 = load in the main process (slower, but simplest and safest).
+if IS_ON_KAGGLE:
+    NUM_DATA_WORKERS: int = os.cpu_count() or 1  # cpu_count() can return None; fall back to 1
+else:
+    NUM_DATA_WORKERS: int = 0
 
 # ---------------------------------------------------------------------------
 # Transfer learning (ResNet18, Phase 6)

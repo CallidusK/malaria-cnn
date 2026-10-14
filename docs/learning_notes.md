@@ -181,3 +181,27 @@ Each note points to the file (and function) where the idea lives in the code.
 **What:** train on the same 16 images 100 times. A working model *must* be able to memorise them (loss → ~0).
 **Why:** it catches broken code (wrong labels, a disconnected layer, a learning rate of 0) in seconds, before you spend an hour of GPU time. We confirmed it works by setting the learning rate to 0: the test failed, as it should.
 **Where:** `src/train.py` → `overfit_one_batch()`; run it with `python -m src.train --overfit-batch`. The test is in `tests/test_models.py`.
+
+---
+
+## Phase 4: First real training run on Kaggle
+
+### Moving code to Kaggle with a zip
+**What:** `git archive --format=zip --prefix=malaria-cnn/ -o malaria-cnn-code.zip HEAD` packs the files of the latest commit into a zip. On Kaggle, the zip becomes a private dataset that the notebook reads.
+**Why `git archive` and not "right-click → compress":** it only includes *committed* files, so the zip never contains `.venv/`, fake data, old outputs or half-finished edits. Kaggle runs exactly the version you committed. That also means: **commit first, then zip**.
+**Where:** setup steps at the top of `notebooks/02_run_on_kaggle.ipynb`.
+
+### Read-only inputs, writable working folder
+**What:** on Kaggle, `/kaggle/input/` (attached datasets) is read-only; `/kaggle/working/` is writable, and only files there appear in the notebook's Output tab.
+**Why it matters:** the first run must *write* `splits/splits.csv`, so the notebook copies the code from the input into `/kaggle/working/malaria-cnn` and runs it there.
+**Where:** notebook sections 2 and 3; the output folder is chosen in `src/config.py` (`IS_ON_KAGGLE`, `OUTPUT_DIR`).
+
+### Data-loading workers
+**What:** while the GPU trains on one batch, background CPU processes ("workers") are already loading and augmenting the next batches.
+**Why:** a GPU is so fast that loading images from disk can become the bottleneck. One worker per CPU core keeps it fed.
+**Where:** `NUM_DATA_WORKERS` in `src/config.py`, used by `get_dataloaders()` in `src/data.py`.
+
+### Exit codes
+**What:** every program finishes with a number: 0 = success, anything else = failure. `--overfit-batch` exits with 1 if the check fails.
+**Why:** the notebook checks it (`_exit_code`) and stops before wasting GPU time on a broken setup.
+**Where:** `src/train.py` → `main()` (`sys.exit`), and notebook sections 5 and 6.
