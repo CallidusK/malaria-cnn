@@ -230,7 +230,7 @@ In `src/train.py`, an **explicit** training loop (no high-level wrappers):
 - Loss: `BCEWithLogitsLoss` (standard for yes/no problems).
 - Optimiser: Adam, learning rate `1e-3`.
 - Learning-rate scheduler: `ReduceLROnPlateau` (lowers the learning rate when progress stalls).
-- Up to ~15 epochs with **early stopping** (stop if validation loss hasn't improved for 4 epochs).
+- Up to **30** epochs with **early stopping** (stop if validation loss hasn't improved for 4 epochs). *(Originally ~15; raised after the first Kaggle run reached its best validation loss at epoch 15 of 15.)*
 - Save the **best** model (lowest validation loss) to `outputs/`.
 - Log per epoch: train loss, val loss, val accuracy, val recall. Save history as JSON and plot loss/accuracy curves.
 - Command line: `python -m src.train --model simple_cnn --data-dir <path> [--smoke-test]`. `--smoke-test` = 1 epoch on fake data, CPU-friendly.

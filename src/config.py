@@ -133,7 +133,10 @@ BATCH_SIZE: int = 64
 
 # An "epoch" is one full pass over all training images. This is the maximum;
 # early stopping usually ends training sooner.
-MAX_EPOCHS: int = 15
+# Raised from 15 to 30 after the first Kaggle run: its best epoch was the last
+# one (validation loss still improving), so 15 cut training short. With 30,
+# early stopping decides when to stop instead of the limit.
+MAX_EPOCHS: int = 30
 
 # Stop training if validation loss hasn't improved for this many epochs.
 EARLY_STOPPING_PATIENCE: int = 4

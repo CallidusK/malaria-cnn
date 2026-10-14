@@ -1,9 +1,16 @@
 # Local dependencies (laptop). Install with:
 #     pip install -r requirements.txt
 #
-# These are minimum versions for now. PLAN.md says to pin exact versions after
-# checking what Kaggle uses (run `pip freeze` in a Kaggle cell, Phase 4),
-# so the laptop and Kaggle run the same library versions.
+# These are MINIMUM versions, not exact pins. PLAN.md suggested pinning the
+# exact versions Kaggle uses, but Kaggle runs Python 3.13 and this laptop runs
+# Python 3.14, and some of Kaggle's exact versions don't install on 3.14.
+# Decision (Phase 4): keep the laptop on Python 3.14 with minimum versions.
+# The laptop only runs quick smoke tests; all real results come from Kaggle.
+#
+# Kaggle's versions, recorded from the Phase 4 run (Tesla T4 GPU):
+#     python 3.13.15, torch 2.11.0+cu128, torchvision 0.26.0+cu128,
+#     numpy 2.1.3, pandas 2.3.3, Pillow 12.3.0, scikit-learn 1.6.1,
+#     matplotlib 3.10.0, tqdm 4.67.3
 
 torch>=2.2            # deep learning: tensors, layers, training
 torchvision>=0.17     # image transforms and the pretrained ResNet18
