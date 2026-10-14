@@ -47,9 +47,29 @@ def split_table(fake_data_dir: Path) -> pd.DataFrame:
 # Finding images
 # ---------------------------------------------------------------------------
 
-def test_patient_id_is_read_from_a_real_style_filename() -> None:
-    filename = "C33P1thinF_IMG_20150619_114756a_cell_179.png"
-    assert data.extract_patient_id(filename) == "C33P1"
+# Real filenames printed by the Phase 1 notebook on Kaggle, with the patient ID each must give.
+@pytest.mark.parametrize("filename, expected_patient_id", [
+    ("C33P1thinF_IMG_20150619_114756a_cell_179.png", "C33"),
+    ("C138P99ThinF_IMG_20151005_173241_cell_99.png", "C138"),
+    ("C42P5thin_original_IMG_20150623_134751_cell_1.png", "C42"),
+    ("C3thin_original_IMG_20150608_163029_cell_57.png", "C3"),
+    ("C232ThinF_IMG_20151112_154211_cell_158.png", "C232"),
+    ("C167P128ReThinF_IMG_20151201_105559_cell_233.png", "C167"),
+])
+def test_patient_id_is_read_from_real_filenames(filename: str, expected_patient_id: str) -> None:
+    assert data.extract_patient_id(filename) == expected_patient_id
+
+
+def test_code_variants_of_one_patient_get_the_same_id() -> None:
+    # "C173P134N" looks like a variant of "C173P134": they must not be split apart.
+    plain = data.extract_patient_id("C173P134ThinF_IMG_20151203_cell_1.png")
+    with_suffix = data.extract_patient_id("C173P134NThinF_IMG_20151203_cell_2.png")
+    assert plain == with_suffix == "C173"
+
+
+def test_fake_patients_are_recognised_despite_mixed_filename_styles(fake_data_dir: Path) -> None:
+    table = data.find_images(fake_data_dir)
+    assert table["patient_id"].nunique() == config.FAKE_NUM_PATIENTS
 
 
 def test_filename_without_patient_code_raises_an_error() -> None:

@@ -205,3 +205,26 @@ Each note points to the file (and function) where the idea lives in the code.
 **What:** every program finishes with a number: 0 = success, anything else = failure. `--overfit-batch` exits with 1 if the check fails.
 **Why:** the notebook checks it (`_exit_code`) and stops before wasting GPU time on a broken setup.
 **Where:** `src/train.py` → `main()` (`sys.exit`), and notebook sections 5 and 6.
+
+---
+
+## What the real data showed (Phase 1 notebook, run on Kaggle)
+
+| Check | Result |
+|---|---|
+| Images | 55,116 `.png` files, but only **27,558 unique**: the nested `cell_images/cell_images/` folder holds a full second copy |
+| Class balance | exactly **13,779 Parasitized / 13,779 Uninfected** (50/50) |
+| Duplicates under different names | 0 |
+| Same image under both labels | 0 |
+| Junk files | 4 `Thumbs.db` |
+| Image sizes | widths 46–394, heights 40–385, median 130 px, so 128×128 is a good fit |
+| Kaggle mount path | `/kaggle/input/datasets/iarunava/cell-images-for-detecting-malaria/...`, which is why we search instead of hardcoding paths |
+| Patients | 196 distinct codes: 148 with both classes, 48 with healthy cells only. This matches the dataset's published ~150 infected + ~50 healthy patients |
+
+### Lesson: check your assumptions on the real data
+Our first guess ("the patient code is everything before `thinF`") was wrong in two ways:
+1. **356 filenames use `thin_original` instead of `thinF`.** The old code would have stopped with an error on the first real training run.
+2. **Some codes have extra letters** (`C173P134N`, `C167P128Re`) that look like variants of plain codes (`C173P134`). Counting them as different patients could split one person across train and test: patient leakage.
+
+**The fix:** the patient ID is just the leading **C number** (`C173P134N` → `C173`). The notebook showed every C number goes with exactly one P number, so this only merges variants of the same code, never two different patients. It's the safe choice.
+**Where:** `src/data.py` → `extract_patient_id()`. The real filenames are now test cases in `tests/test_data.py`, and the fake data uses all five filename styles.

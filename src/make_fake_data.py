@@ -11,7 +11,8 @@ that our code runs without crashing, we draw a few dozen cartoon "cells":
 It copies the real dataset's quirks on purpose, so our data code is tested
 against them:
   - one folder per class, named after the class
-  - filenames that contain a patient/slide code, like the real ones
+  - filenames that contain a patient code, written in all the real styles
+    (e.g. "C3P3thinF", "C3P3thin_original", "C3P3NThinF", "C3ThinF")
   - a nested duplicate folder (cell_images/cell_images/) with the same images
   - a junk Thumbs.db file in each class folder
 
@@ -86,16 +87,29 @@ def draw_fake_cell(image_size: int, is_infected: bool, rng: random.Random) -> Im
     return image
 
 
-def make_fake_filename(patient_number: int, cell_number: int) -> str:
+# The filename styles found in the real dataset by the Phase 1 notebook.
+# {c} is the patient number, {cell} the cell number. They all start with
+# "C<number>", which is what src/data.py uses as the patient ID.
+FILENAME_STYLES = [
+    "C{c}P{c}thinF_IMG_20150101_120000_cell_{cell}.png",          # the most common style
+    "C{c}P{c}ThinF_IMG_20150101_120000_cell_{cell}.png",          # capital T
+    "C{c}P{c}thin_original_IMG_20150101_120000_cell_{cell}.png",  # "thin_original" instead of "thinF"
+    "C{c}P{c}NThinF_IMG_20150101_120000_cell_{cell}.png",         # an extra letter after the code
+    "C{c}ThinF_IMG_20150101_120000_cell_{cell}.png",              # no P number at all
+]
+
+
+def make_fake_filename(patient_number: int, cell_number: int, rng: random.Random) -> str:
     """
-    Build a filename in the same style as the real dataset.
+    Build a filename in one of the real dataset's styles, picked at random.
 
     Real example: C33P1thinF_IMG_20150619_114756a_cell_179.png
-    The start ("C33P1") is the patient/slide code. Phase 1 checks this pattern
-    on the real filenames before we rely on it.
+    Mixing styles means one fake patient's cells carry differently written
+    codes (e.g. "C3P3thinF" and "C3P3NThinF"), just like in the real data,
+    so our tests check that they are still recognised as the same patient.
     """
-    patient_code = f"C{patient_number}P{patient_number}"
-    return f"{patient_code}thinF_IMG_20150101_120000_cell_{cell_number}.png"
+    style = rng.choice(FILENAME_STYLES)
+    return style.format(c=patient_number, cell=cell_number)
 
 
 def make_class_folder(class_folder: Path, is_infected: bool, rng: random.Random) -> None:
@@ -118,7 +132,7 @@ def make_class_folder(class_folder: Path, is_infected: bool, rng: random.Random)
 
         image_size = rng.randint(config.FAKE_IMAGE_MIN_SIZE, config.FAKE_IMAGE_MAX_SIZE)
         image = draw_fake_cell(image_size, is_infected, rng)
-        image.save(class_folder / make_fake_filename(patient_number, cell_number))
+        image.save(class_folder / make_fake_filename(patient_number, cell_number, rng))
 
     # A junk file, like the Thumbs.db files Windows leaves in the real dataset.
     (class_folder / "Thumbs.db").write_bytes(b"not an image")

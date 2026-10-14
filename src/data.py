@@ -48,32 +48,41 @@ SPLIT_NAMES: list[str] = ["train", "val", "test"]
 
 # A regular expression (a pattern for matching text). It reads:
 #   ^       from the start of the filename,
-#   (.+?)   capture the shortest run of characters (this is the patient code),
-#   _?      then an optional underscore,
-#   thinF   then the text "thinF" (a thin blood film slide), in any upper/lower case.
-# Example: "C33P1thinF_IMG_20150619_114756a_cell_179.png" -> "C33P1"
-PATIENT_CODE_PATTERN = re.compile(r"^(.+?)_?thinF", re.IGNORECASE)
+#   C       the letter C (upper or lower case, thanks to re.IGNORECASE),
+#   (\d+)   then one or more digits, which we capture: the patient number.
+# Everything after the number is ignored. Real examples from the Phase 1 notebook:
+#   "C33P1thinF_IMG_20150619_114756a_cell_179.png"   -> C33
+#   "C42P5thin_original_IMG_20150623_134751_cell_1.png" -> C42
+#   "C173P134NThinF_..." and "C173P134ThinF_..."      -> both C173
+#   "C232ThinF_IMG_20151112_154211_cell_158.png"     -> C232
+PATIENT_NUMBER_PATTERN = re.compile(r"^C(\d+)", re.IGNORECASE)
 
 
 def extract_patient_id(filename: str) -> str:
     """
-    Read the patient/slide code from the start of a filename.
+    Read the patient ID from the start of a filename: "C" plus its number, e.g. "C33".
 
-    For now the WHOLE code (e.g. "C33P1") counts as one patient. If the Phase 1
-    notebook shows that a patient is really identified differently (e.g. only
-    by the "P" number), this is the only function that needs to change.
+    Why only the C number, and not the whole code like "C33P1"? The Phase 1
+    notebook on the real data showed:
+      - some codes carry extra letters ("C173P134N", "C167P128Re") that look
+        like variants of the plain code ("C173P134"). Treating them as different
+        patients could put one person's cells in two splits (patient leakage);
+      - every C number goes with exactly one P number, so grouping by the
+        C number never merges two genuinely different patients.
+    So the C number is the safe choice.
 
-    A filename that doesn't fit the pattern raises an error on purpose: if we
-    can't tell which patient an image belongs to, we can't split it safely.
+    A filename that doesn't start with "C<number>" raises an error on purpose:
+    if we can't tell which patient an image belongs to, we can't split it safely.
     """
-    match = PATIENT_CODE_PATTERN.match(filename)
+    match = PATIENT_NUMBER_PATTERN.match(filename)
     if match is None:
         raise ValueError(
-            f"Can't find a patient code in the filename '{filename}'. "
+            f"Can't find a patient number in the filename '{filename}'. "
             "Check the filename pattern in src/data.py -> extract_patient_id()."
         )
-    # Upper case, so "c33p1" and "C33P1" count as the same patient.
-    return match.group(1).upper()
+    # int() drops any leading zeros, so "C033" and "C33" count as the same patient.
+    patient_number = int(match.group(1))
+    return f"C{patient_number}"
 
 
 def file_hash(path: Path) -> str:
