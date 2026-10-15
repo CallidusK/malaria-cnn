@@ -31,6 +31,7 @@ import matplotlib
 # when this runs as a script on Kaggle.
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402  (must come after matplotlib.use)
+from matplotlib.ticker import MaxNLocator  # noqa: E402
 
 import pandas as pd
 import torch
@@ -318,8 +319,13 @@ def plot_history(history: list[dict], path: Path) -> None:
     metric_axis.plot(epochs, val_recalls, marker="o", label="validation recall")
     metric_axis.set_title("Validation accuracy and recall (higher is better)")
     metric_axis.set_xlabel("epoch")
-    metric_axis.set_ylim(0, 1.05)
+    # No fixed 0-to-1 range: matplotlib zooms in on the actual values, so small
+    # but real differences (e.g. 94% vs 96%) are visible instead of a flat line.
     metric_axis.legend()
+
+    # Epochs are whole numbers, so don't show ticks like 2.5.
+    for axis in (loss_axis, metric_axis):
+        axis.xaxis.set_major_locator(MaxNLocator(integer=True))
 
     figure.tight_layout()
     figure.savefig(path, dpi=100)

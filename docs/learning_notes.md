@@ -228,3 +228,12 @@ Our first guess ("the patient code is everything before `thinF`") was wrong in t
 
 **The fix:** the patient ID is just the leading **C number** (`C173P134N` → `C173`). The notebook showed every C number goes with exactly one P number, so this only merges variants of the same code, never two different patients. It's the safe choice.
 **Where:** `src/data.py` → `extract_patient_id()`. The real filenames are now test cases in `tests/test_data.py`, and the fake data uses all five filename styles.
+
+### What the real Phase 4 runs taught us
+- **Reproducibility works.** The second run (max 30 epochs) produced the *same* split and the *same* first 15 epochs, to 4 decimal places, as the first run (max 15). That's `set_seed()` (`src/utils.py`) plus the saved `splits.csv` doing their job.
+- **Why validation loss can be *lower* than training loss.** During training, dropout switches off 30% of the features and augmentation scrambles the images, so the task is deliberately harder. Validation runs in `model.eval()` mode on clean images. So "val below train" doesn't mean anything is wrong here.
+- **The epoch limit vs early stopping.** With a 15-epoch limit, the best epoch was the last one: the limit stopped training, not the model. With 30, early stopping took over (best epoch 17, stopped at 21), and validation loss improved only a little (0.1077 → 0.1034). So the model had essentially finished learning.
+- **Accuracy vs recall can move in opposite directions.** At epoch 6, recall rose while accuracy fell: the model called more cells "infected", catching more parasites but also raising more false alarms. Phase 5 controls this trade-off deliberately with the decision threshold.
+- **Read your axes.** A 0-to-1 axis made 94% and 96% look identical. `plot_history()` (`src/train.py`) now zooms in on the real values. The flip side: a zoomed axis makes small differences *look* big, so always check the numbers on the axis.
+
+**Results files:** `results/simple_cnn_history.json` (the real per-epoch numbers from Kaggle) and `results/simple_cnn_curves.png` (drawn from that file). The split is in `splits/splits.csv`. The trained weights (`outputs/simple_cnn_best.pt`, 1.6 MB) are kept out of git.
