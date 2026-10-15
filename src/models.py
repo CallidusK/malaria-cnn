@@ -15,11 +15,12 @@ a probability between 0 and 1.
 
 import torch
 from torch import nn
+from torchvision.models import ResNet18_Weights, resnet18
 
 from src import config
 
 # The models that build_model() knows about.
-MODEL_NAMES: list[str] = ["simple_cnn"]
+MODEL_NAMES: list[str] = ["simple_cnn", "resnet18"]
 
 
 class ConvBlock(nn.Module):
@@ -118,10 +119,87 @@ class SimpleCNN(nn.Module):
         return logits.squeeze(dim=1)  # (batch,)
 
 
-def build_model(model_name: str) -> nn.Module:
-    """Create a fresh, untrained model by name (e.g. "simple_cnn")."""
+class ResNet18Classifier(nn.Module):
+    """
+    ResNet18, pretrained on ImageNet (1.2 million everyday photos in 1,000 classes),
+    with its last layer replaced so it answers our yes/no question.
+
+    Why can photos of dogs and cars help with blood cells? The early layers of a
+    trained CNN detect general things (edges, textures, colour blobs) that are
+    useful for almost any image. We reuse those and only teach it what's new.
+
+    Shapes for a batch of 224x224 images:
+        input                        (batch,   3, 224, 224)
+        ResNet18 layers (conv/pool)  (batch, 512,   7,   7)   inside the backbone
+        its global average pool      (batch, 512)
+        our new last layer           (batch,   1)
+        output                       (batch,)                 one logit per image
+    """
+
+    def __init__(self, pretrained: bool = True):
+        super().__init__()
+        # pretrained=True downloads ImageNet weights (about 45 MB, needs Internet).
+        # pretrained=False gives random weights: used by the tests, and when
+        # loading our own trained model (whose weights replace them anyway).
+        weights = ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
+        self.backbone = resnet18(weights=weights)
+
+        # ResNet18's last layer ("fc") maps 512 features to 1,000 ImageNet classes.
+        # Swap it for a fresh layer mapping the same 512 features to 1 logit.
+        self.backbone.fc = nn.Linear(config.RESNET_FEATURE_SIZE, 1)
+
+    def forward(self, images: torch.Tensor) -> torch.Tensor:
+        logits = self.backbone(images)  # (batch, 1)
+        return logits.squeeze(dim=1)    # (batch,)
+
+    def classifier(self) -> nn.Module:
+        """The new last layer: the only part that learns during the frozen stage."""
+        return self.backbone.fc
+
+
+def freeze_pretrained_layers(model: ResNet18Classifier) -> None:
+    """
+    Lock every pretrained weight, so only the new last layer learns.
+
+    requires_grad=False tells PyTorch not to compute gradients for a weight,
+    so the optimiser can't change it.
+    """
+    for parameter in model.parameters():
+        parameter.requires_grad = False
+    for parameter in model.classifier().parameters():
+        parameter.requires_grad = True
+
+
+def unfreeze_all_layers(model: nn.Module) -> None:
+    """Let every weight learn again (the fine-tune stage)."""
+    for parameter in model.parameters():
+        parameter.requires_grad = True
+
+
+def keep_batchnorm_statistics_frozen(model: nn.Module) -> None:
+    """
+    Stop BatchNorm layers from updating their running statistics.
+
+    The subtle trap: freezing weights (requires_grad=False) does NOT freeze
+    BatchNorm's running mean and variance. In training mode they keep updating
+    from every batch, so the "frozen" pretrained layers would quietly change
+    anyway. Putting just the BatchNorm layers into evaluation mode stops that.
+    Call this AFTER model.train(), because model.train() switches them back on.
+    """
+    for module in model.modules():
+        if isinstance(module, nn.BatchNorm2d):
+            module.eval()
+
+
+def build_model(model_name: str, pretrained: bool = True) -> nn.Module:
+    """
+    Create a fresh model by name: "simple_cnn" or "resnet18".
+    `pretrained` only matters for ResNet18 (SimpleCNN always starts from random weights).
+    """
     if model_name == "simple_cnn":
         return SimpleCNN()
+    if model_name == "resnet18":
+        return ResNet18Classifier(pretrained=pretrained)
     raise ValueError(f"Unknown model '{model_name}'. Choose one of: {MODEL_NAMES}")
 
 
@@ -129,12 +207,23 @@ def image_size_for(model_name: str) -> int:
     """The image size each model expects (set in config.py)."""
     if model_name == "simple_cnn":
         return config.SIMPLE_CNN_IMAGE_SIZE
+    if model_name == "resnet18":
+        return config.RESNET_IMAGE_SIZE
     raise ValueError(f"Unknown model '{model_name}'. Choose one of: {MODEL_NAMES}")
 
 
 def count_parameters(model: nn.Module) -> int:
-    """How many numbers (weights) the model can learn. A rough measure of its size."""
+    """How many numbers (weights) the model has. A rough measure of its size."""
     total = 0
     for parameter in model.parameters():
         total += parameter.numel()  # numel = number of elements in this weight tensor
+    return total
+
+
+def count_trainable_parameters(model: nn.Module) -> int:
+    """How many of those weights are currently allowed to learn (not frozen)."""
+    total = 0
+    for parameter in model.parameters():
+        if parameter.requires_grad:
+            total += parameter.numel()
     return total

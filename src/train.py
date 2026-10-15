@@ -7,15 +7,17 @@ Where this fits in the pipeline:
 What happens, in the order of this file:
     1. train_one_epoch()    one pass over all training images, updating the weights
     2. validate()           measure loss, accuracy and recall on the validation images
-    3. train_model()        repeat 1 + 2 for many epochs, with a learning-rate scheduler,
+    3. run_training_stage() repeat 1 + 2 for many epochs, with a learning-rate scheduler,
                             early stopping, and saving the best model so far
+       train_model()        SimpleCNN: one stage. ResNet18: a "frozen" stage, then "fine-tune"
     4. save/plot history    a JSON file and a picture of the loss/accuracy curves
     5. overfit_one_batch()  sanity check: can the model memorise just 16 images?
 
 How to run it:
-    python -m src.train --smoke-test                    # 1 epoch on fake data (laptop)
-    python -m src.train --overfit-batch                 # sanity check on fake data
-    python -m src.train --model simple_cnn --data-dir /kaggle/input/...   # real training (Kaggle)
+    python -m src.train --smoke-test                              # 1 epoch on fake data (laptop)
+    python -m src.train --model resnet18 --smoke-test             # 1 epoch per ResNet18 stage
+    python -m src.train --overfit-batch                           # sanity check on fake data
+    python -m src.train --model resnet18 --data-dir /kaggle/input # real training (Kaggle)
 """
 
 import argparse
@@ -23,6 +25,7 @@ import json
 import math
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import matplotlib
@@ -48,7 +51,16 @@ from src.data import (
     load_or_create_splits,
 )
 from src.make_fake_data import create_fake_dataset
-from src.models import MODEL_NAMES, build_model, count_parameters, image_size_for
+from src.models import (
+    MODEL_NAMES,
+    build_model,
+    count_parameters,
+    count_trainable_parameters,
+    freeze_pretrained_layers,
+    image_size_for,
+    keep_batchnorm_statistics_frozen,
+    unfreeze_all_layers,
+)
 from src.utils import get_device, set_seed
 
 
@@ -62,13 +74,17 @@ def train_one_epoch(
     loss_function: nn.Module,
     optimiser: torch.optim.Optimizer,
     device: torch.device,
+    batchnorm_frozen: bool = False,
 ) -> float:
     """
     Show the model every training image once, adjusting its weights after each batch.
     Returns the average training loss over the epoch.
+    batchnorm_frozen=True keeps BatchNorm's running statistics fixed (ResNet18's frozen stage).
     """
     # Training mode: dropout is ON, and BatchNorm uses the current batch's statistics.
     model.train()
+    if batchnorm_frozen:
+        keep_batchnorm_statistics_frozen(model)  # must come after model.train()
 
     total_loss = 0.0
     total_images = 0
@@ -195,7 +211,7 @@ def save_checkpoint(model: nn.Module, model_name: str, epoch: int, val_loss: flo
 def print_epoch(record: dict) -> None:
     """One readable line per epoch."""
     print(
-        f"epoch {record['epoch']:>2} | "
+        f"epoch {record['epoch']:>2} ({record['stage']}) | "
         f"train loss {record['train_loss']:.4f} | "
         f"val loss {record['val_loss']:.4f} | "
         f"val acc {record['val_accuracy']:.3f} | "
@@ -205,33 +221,36 @@ def print_epoch(record: dict) -> None:
     )
 
 
-def train_model(
-    model_name: str,
-    split_table: pd.DataFrame,
-    data_dir: Path,
-    output_dir: Path,
-    num_epochs: int,
+@dataclass
+class TrainingProgress:
+    """
+    Bookkeeping shared by all training stages of one model.
+    (A dataclass is a class that just holds a few named values.)
+    """
+    model_name: str
+    checkpoint_path: Path
+    best_val_loss: float = math.inf  # anything beats infinity, so the first epoch is always "best so far"
+    epochs_done: int = 0             # counted across stages, so epoch numbers keep going up
+    history: list[dict] = field(default_factory=list)
+
+
+def run_training_stage(
+    stage_name: str,
+    model: nn.Module,
+    dataloaders: dict[str, DataLoader],
+    optimiser: torch.optim.Optimizer,
+    max_epochs: int,
+    progress: TrainingProgress,
     device: torch.device,
-) -> list[dict]:
+    batchnorm_frozen: bool = False,
+) -> None:
     """
-    Train a fresh model for up to num_epochs, keeping the best version.
+    Train for up to max_epochs with one optimiser, saving the best model so far.
 
-    "Best" = lowest validation loss. Training stops early if the validation
-    loss hasn't improved for EARLY_STOPPING_PATIENCE epochs in a row.
-    Returns the history: one dictionary of numbers per epoch.
+    "Best" = lowest validation loss over ALL stages. This stage stops early if
+    the validation loss hasn't improved for EARLY_STOPPING_PATIENCE epochs in a row.
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    image_size = image_size_for(model_name)
-    dataloaders = get_dataloaders(split_table, data_dir, image_size)
-
-    model = build_model(model_name).to(device)
-    print(f"Model: {model_name} with {count_parameters(model):,} learnable parameters")
-
     loss_function = nn.BCEWithLogitsLoss()
-
-    # Adam: an optimiser that adapts the step size for each weight automatically.
-    # A reliable default that needs little tuning.
-    optimiser = torch.optim.Adam(model.parameters(), lr=config.SIMPLE_CNN_LEARNING_RATE)
 
     # When validation loss hasn't improved for LR_SCHEDULER_PATIENCE epochs,
     # multiply the learning rate by LR_SCHEDULER_FACTOR: smaller, more careful
@@ -243,21 +262,20 @@ def train_model(
         patience=config.LR_SCHEDULER_PATIENCE,
     )
 
-    checkpoint_path = output_dir / f"{model_name}_best.pt"
-    best_val_loss = math.inf  # anything beats infinity, so epoch 1 is always "best so far"
     epochs_without_improvement = 0
-    history = []
-
-    for epoch in range(1, num_epochs + 1):
+    for _ in range(max_epochs):
+        progress.epochs_done += 1
         start_time = time.time()
         learning_rate = optimiser.param_groups[0]["lr"]  # the rate used during THIS epoch
 
-        train_loss = train_one_epoch(model, dataloaders["train"], loss_function, optimiser, device)
+        train_loss = train_one_epoch(model, dataloaders["train"], loss_function, optimiser, device,
+                                     batchnorm_frozen=batchnorm_frozen)
         val_metrics = validate(model, dataloaders["val"], loss_function, device)
         scheduler.step(val_metrics["loss"])
 
         record = {
-            "epoch": epoch,
+            "epoch": progress.epochs_done,
+            "stage": stage_name,
             "train_loss": train_loss,
             "val_loss": val_metrics["loss"],
             "val_accuracy": val_metrics["accuracy"],
@@ -265,25 +283,80 @@ def train_model(
             "learning_rate": learning_rate,
             "seconds": time.time() - start_time,
         }
-        history.append(record)
+        progress.history.append(record)
         print_epoch(record)
 
         # Early stopping: keep the best model; give up after too many epochs without progress.
-        if val_metrics["loss"] < best_val_loss:
-            best_val_loss = val_metrics["loss"]
+        if val_metrics["loss"] < progress.best_val_loss:
+            progress.best_val_loss = val_metrics["loss"]
             epochs_without_improvement = 0
-            save_checkpoint(model, model_name, epoch, best_val_loss, checkpoint_path)
-            print(f"          new best validation loss: saved to {checkpoint_path.name}")
+            save_checkpoint(model, progress.model_name, progress.epochs_done,
+                            progress.best_val_loss, progress.checkpoint_path)
+            print(f"          new best validation loss: saved to {progress.checkpoint_path.name}")
         else:
             epochs_without_improvement += 1
             if epochs_without_improvement >= config.EARLY_STOPPING_PATIENCE:
                 print(f"Early stopping: no improvement for {epochs_without_improvement} epochs.")
                 break
 
-    save_history(history, output_dir / f"{model_name}_history.json")
-    plot_history(history, output_dir / f"{model_name}_curves.png")
-    print(f"Best validation loss {best_val_loss:.4f}. Outputs are in {output_dir}")
-    return history
+
+def train_model(
+    model_name: str,
+    split_table: pd.DataFrame,
+    data_dir: Path,
+    output_dir: Path,
+    num_epochs: int,
+    device: torch.device,
+    pretrained: bool = True,
+) -> list[dict]:
+    """
+    Train a fresh model, keeping the best version. Returns the history (one dict per epoch).
+
+    SimpleCNN: one stage, Adam, all weights learning from the start.
+    ResNet18:  two stages (transfer learning):
+        1. "frozen":    pretrained layers locked, only the new last layer learns
+        2. "fine-tune": everything learns, with a small learning rate
+    `pretrained=False` skips downloading ResNet18's ImageNet weights (used by the tests).
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dataloaders = get_dataloaders(split_table, data_dir, image_size_for(model_name))
+    model = build_model(model_name, pretrained=pretrained).to(device)
+    print(f"Model: {model_name} with {count_parameters(model):,} parameters")
+
+    progress = TrainingProgress(model_name, checkpoint_path=output_dir / f"{model_name}_best.pt")
+
+    if model_name == "simple_cnn":
+        # Adam: an optimiser that adapts the step size for each weight automatically.
+        # A reliable default that needs little tuning.
+        optimiser = torch.optim.Adam(model.parameters(), lr=config.SIMPLE_CNN_LEARNING_RATE)
+        run_training_stage("train", model, dataloaders, optimiser, num_epochs, progress, device)
+
+    elif model_name == "resnet18":
+        # Stage 1, frozen: the new last layer starts random. If everything learned
+        # at once, its big random errors would send big, damaging updates back
+        # into the pretrained layers. So first let it learn on its own.
+        freeze_pretrained_layers(model)
+        print(f"Stage 1 (frozen): {count_trainable_parameters(model):,} trainable parameters")
+        optimiser = torch.optim.Adam(model.classifier().parameters(), lr=config.RESNET_HEAD_LEARNING_RATE)
+        frozen_epochs = min(config.FROZEN_EPOCHS, num_epochs)
+        run_training_stage("frozen", model, dataloaders, optimiser, frozen_epochs, progress, device,
+                           batchnorm_frozen=True)
+
+        # Stage 2, fine-tune: now that the last layer is sensible, let every layer
+        # adapt to blood cells, with small steps so we don't wreck what was learned.
+        # AdamW = Adam with "weight decay" (a gentle pull of weights towards zero).
+        # This stage gets up to num_epochs of its own (so up to 3 + 30 in total);
+        # early stopping normally ends it well before that.
+        unfreeze_all_layers(model)
+        print(f"Stage 2 (fine-tune): {count_trainable_parameters(model):,} trainable parameters")
+        optimiser = torch.optim.AdamW(model.parameters(), lr=config.FINE_TUNE_LEARNING_RATE,
+                                      weight_decay=config.FINE_TUNE_WEIGHT_DECAY)
+        run_training_stage("fine-tune", model, dataloaders, optimiser, num_epochs, progress, device)
+
+    save_history(progress.history, output_dir / f"{model_name}_history.json")
+    plot_history(progress.history, output_dir / f"{model_name}_curves.png")
+    print(f"Best validation loss {progress.best_val_loss:.4f}. Outputs are in {output_dir}")
+    return progress.history
 
 
 # ===========================================================================
@@ -323,6 +396,16 @@ def plot_history(history: list[dict], path: Path) -> None:
     # No fixed 0-to-1 range: matplotlib zooms in on the actual values, so small
     # but real differences (e.g. 94% vs 96%) are visible instead of a flat line.
     metric_axis.legend()
+
+    # For ResNet18: a dashed line where the fine-tune stage begins.
+    # (Older history files have no "stage"; .get() then returns None and no line is drawn.)
+    fine_tune_epochs = [record["epoch"] for record in history if record.get("stage") == "fine-tune"]
+    if fine_tune_epochs:
+        first_fine_tune_epoch = fine_tune_epochs[0]
+        for axis in (loss_axis, metric_axis):
+            axis.axvline(first_fine_tune_epoch - 0.5, linestyle="--", color="grey")
+        loss_axis.text(first_fine_tune_epoch - 0.4, max(train_losses), "fine-tune starts",
+                       color="grey", va="top")
 
     # Epochs are whole numbers, so don't show ticks like 2.5.
     for axis in (loss_axis, metric_axis):

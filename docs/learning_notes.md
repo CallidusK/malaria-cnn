@@ -295,3 +295,34 @@ ROC-AUC 0.985. Full numbers: `results/simple_cnn_metrics.json`.
 - **The trade-off, for real:** lowering the threshold halved the missed infections (132 → 61), at the cost of about 7× more false alarms (33 → 245). Accuracy *fell* (95.6% → 91.8%), even though the model became safer for patients. That's why accuracy is the wrong thing to optimise here.
 - **Validation doesn't transfer perfectly to new patients:** the threshold reached 98.05% recall on the validation patients, but 96.4% on the test patients. That gap is the honest answer to "how does it do on *new* people?". We report it as it is, and we must **not** lower the threshold further by looking at test results.
 - **Some "mistakes" may be label errors.** In `results/simple_cnn_misclassified.png`, many "missed infections" (labelled Parasitized) show no visible parasite, and several "false alarms" (labelled Uninfected) show purple stained spots. Those spots could be parasites, or platelets/stain debris on a healthy cell; it takes an expert to tell. Either way, we never edit the test set to fit the model. These go into the README's limitations.
+
+---
+
+## Phase 6: Transfer learning (ResNet18) and comparison
+
+### Transfer learning
+**What:** instead of starting from random weights, start from a model already trained on a huge dataset (ResNet18 on ImageNet: 1.2 million everyday photos), and adapt it to our task.
+**Why it helps, even though ImageNet has no blood cells:** a CNN's early layers learn *general* visual building blocks (edges, textures, colour blobs, round shapes) that are useful for almost any image. Only the last layers are specific to dogs-vs-cars. We keep the general knowledge and retrain the specific part.
+**Analogy:** hiring an experienced photographer to learn microscopy, instead of someone who has never looked at an image. They still need training, but they already know how to *see*.
+**We saw it happen:** in the overfit check, pretrained ResNet18 memorised 16 cells in about 10 steps; SimpleCNN from scratch needed about 40.
+**Where:** `src/models.py` → `ResNet18Classifier`. Its last layer (`fc`: 512 features → 1,000 ImageNet classes) is replaced by `Linear(512 → 1)`.
+
+### Freezing, then fine-tuning
+**Stage 1, frozen** (3 epochs): every pretrained weight is locked (`requires_grad = False`); only the new last layer (513 numbers) learns.
+**Why first:** the new layer starts random. If everything learned at once, its large, random errors would send large, damaging updates back through the pretrained layers and wreck what they knew.
+**Stage 2, fine-tune:** everything unlocks (11.2 million numbers), with a 10× smaller learning rate (1e-4) and **AdamW** (Adam + *weight decay*, a gentle pull of every weight towards zero). Small steps adjust the pretrained knowledge to blood cells without throwing it away.
+**Where:** `src/train.py` → `train_model()` (the two stages) and `run_training_stage()` (the epoch loop, shared with SimpleCNN). Helpers: `freeze_pretrained_layers()`, `unfreeze_all_layers()` in `src/models.py`.
+
+### The BatchNorm trap
+**What:** freezing weights does **not** freeze BatchNorm's *running statistics* (the average and spread it keeps for evaluation mode). In training mode they keep updating from every batch, so "frozen" layers would quietly change anyway.
+**Fix:** during the frozen stage, the BatchNorm layers are switched back to evaluation mode right after `model.train()`.
+**Where:** `keep_batchnorm_statistics_frozen()` in `src/models.py`, used by `train_one_epoch(..., batchnorm_frozen=True)`. A test checks that a real frozen training epoch leaves the statistics untouched. A first version of that test only checked the helper function, and **missed** a deliberately broken training loop; the improved test catches it.
+
+### Comparing models fairly
+**What:** `results/comparison.md` puts both models side by side: size, training time, speed, and test results at both thresholds.
+**Fair means:** the same 29 test patients, thresholds tuned on validation only, and speed measured on the same GPU. `src/compare.py` *refuses* to compare models tested on different test sets.
+**Not only accuracy:** a model for a clinic laptop must also be small and fast. ResNet18 has about 29× more parameters than SimpleCNN, and works on images about 3× larger (224×224 vs 128×128 pixels), so expect it to be slower per cell.
+**Where:** `src/compare.py` → `benchmark_inference_speed()` (cells per second, using random images, since speed doesn't depend on what the weights learned) and `write_comparison()` (the table, built only from result files).
+
+### Downloading pretrained weights on a Mac
+Python installed from python.org on macOS can fail to download with `CERTIFICATE_VERIFY_FAILED` until its one-time certificate setup is run (`Install Certificates.command`, in the Python folder under Applications). Kaggle (Linux) doesn't have this problem.

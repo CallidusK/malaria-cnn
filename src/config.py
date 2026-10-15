@@ -188,8 +188,33 @@ else:
 # Transfer learning (ResNet18, Phase 6)
 # ---------------------------------------------------------------------------
 
-FROZEN_EPOCHS: int = 3               # stage 1: train only the new last layer
-FINE_TUNE_LEARNING_RATE: float = 1e-4  # stage 2: small steps so we don't wreck pretrained knowledge
+# "Transfer learning" = start from a model already trained on another big
+# dataset (ImageNet: 1.2 million everyday photos) instead of from random weights.
+
+# The number of features ResNet18 produces just before its last layer.
+RESNET_FEATURE_SIZE: int = 512
+
+# Stage 1, "frozen": the pretrained layers are locked; only our new last layer
+# learns. It starts random, so it can take normal-sized steps.
+FROZEN_EPOCHS: int = 3
+RESNET_HEAD_LEARNING_RATE: float = 1e-3
+
+# Stage 2, "fine-tune": everything learns, with small steps so we adjust the
+# pretrained knowledge gently instead of wrecking it.
+FINE_TUNE_LEARNING_RATE: float = 1e-4
+# Weight decay: a gentle pull of every weight towards zero on each step,
+# which discourages extreme weights (a mild guard against overfitting).
+# 0.01 is AdamW's standard default.
+FINE_TUNE_WEIGHT_DECAY: float = 0.01
+
+# ---------------------------------------------------------------------------
+# Speed benchmark (Phase 6 comparison)
+# ---------------------------------------------------------------------------
+
+# Time the model on this many batches of BATCH_SIZE images, after a few
+# untimed "warm-up" batches (the first batches are slow while the GPU gets set up).
+SPEED_WARMUP_BATCHES: int = 5
+SPEED_TIMED_BATCHES: int = 20
 
 # ---------------------------------------------------------------------------
 # Evaluation (Phase 5)

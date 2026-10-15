@@ -60,7 +60,9 @@ def load_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[nn.Mod
     # A safe habit for any file that could come from somewhere else.
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
 
-    model = build_model(checkpoint["model_name"])
+    # pretrained=False: no need to download ImageNet weights, because our own
+    # trained weights replace every one of them on the next line.
+    model = build_model(checkpoint["model_name"], pretrained=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
     model.eval()  # dropout off, BatchNorm uses its learned statistics
