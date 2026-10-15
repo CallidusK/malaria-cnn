@@ -208,6 +208,15 @@ FINE_TUNE_LEARNING_RATE: float = 1e-4
 FINE_TUNE_WEIGHT_DECAY: float = 0.01
 
 # ---------------------------------------------------------------------------
+# Grad-CAM heatmaps (Phase 7)
+# ---------------------------------------------------------------------------
+
+# Cells shown per group (caught, cleared, missed, false alarm) in each model's grid.
+GRADCAM_EXAMPLES_PER_GROUP: int = 4
+# Cells shown in the "both models got it wrong" figure.
+GRADCAM_SHARED_MISTAKES: int = 6
+
+# ---------------------------------------------------------------------------
 # Speed benchmark (Phase 6 comparison)
 # ---------------------------------------------------------------------------
 

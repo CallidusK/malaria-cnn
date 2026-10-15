@@ -344,3 +344,27 @@ Full table: `results/comparison.md` (rebuilt locally from the result files, and 
 - **The price:** 29× more parameters and about 4× slower. Speed measurements vary by a few percent between runs (one run measured 4,988 / 1,171 cells per second), but the ratio stays the same. Speed on a laptop *CPU*, which a clinic might have, has **not** been measured.
 - **Fine-tuning is where transfer learning pays off:** in the frozen stage, validation loss only reached about 0.24; one epoch of fine-tuning took it to about 0.10 (`results/resnet18_curves.png`, dashed line).
 - **Both models get the same cells "wrong".** Several of ResNet18's most confident mistakes are the very images SimpleCNN got wrong: "infected" cells with no visible parasite, and "healthy" cells with purple spots. Two very different models confidently disagreeing with the same labels makes label errors more plausible, though only an expert could confirm it.
+
+---
+
+## Phase 7: Explainability with Grad-CAM
+
+### Why "black box" models are a problem in medicine
+A model that only says "infected, 97%" gives a doctor nothing to check. It might be right for the wrong reason: for example, reacting to a slide's stain colour or a smudge on the cell's edge instead of the parasite. Such a shortcut can score well on one dataset and fail on the next hospital's slides. Seeing *where* the model looked lets a human judge whether its reasons make sense.
+
+### What Grad-CAM shows, and how
+**Analogy:** asking a student "which part of the picture made you say that?" and having them circle it.
+**How it works:**
+1. The last convolutional layer's feature maps say *where* each learned pattern appears (ResNet18: 512 maps of 7×7; SimpleCNN: 256 maps of 16×16).
+2. The *gradient* of the model's answer with respect to each map says how much that map mattered for this answer.
+3. Add the maps together, weighted by how much they mattered, and keep the positive part. That gives a coarse heatmap, stretched to the image's size and laid over the cell. **Red = pushed the model towards its answer.**
+
+**Why the last convolutional layer:** earlier layers find simple things (edges, colours) that say little about the decision. After the last convolution, the global average pool throws away *where* things are. The last convolutional layer is the final point that has both meaning and location.
+**Where:** `src/gradcam.py` → `target_layer_for()` (which layer), `compute_heatmaps()` (Grad-CAM itself, using the `grad-cam` library), `overlay()` (drawing).
+
+### Explaining the model's own answer
+Each heatmap explains *what the model decided*: "why infected?" for cells it called infected, "why healthy?" for cells it called healthy. If we always asked "why infected?", a healthy cell would have almost no evidence anywhere. Grad-CAM scales every heatmap to 0..1, so that near-zero noise would be stretched into bright, misleading hot spots.
+**Where:** `compute_heatmaps(..., explain_labels)`; the labels come from the tuned thresholds in `results/<model>_metrics.json`, the same ones as Phase 5, not re-tuned.
+
+### A first sanity check (fake data)
+Even a barely-trained smoke-test ResNet18 lit up on the purple blob in most correctly caught "infected" cartoon cells. On a missed one, it had looked at the plain middle of the cell instead of the blob near the edge. That's the kind of reasoning Grad-CAM makes visible.
