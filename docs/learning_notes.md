@@ -237,3 +237,47 @@ Our first guess ("the patient code is everything before `thinF`") was wrong in t
 - **Read your axes.** A 0-to-1 axis made 94% and 96% look identical. `plot_history()` (`src/train.py`) now zooms in on the real values. The flip side: a zoomed axis makes small differences *look* big, so always check the numbers on the axis.
 
 **Results files:** `results/simple_cnn_history.json` (the real per-epoch numbers from Kaggle) and `results/simple_cnn_curves.png` (drawn from that file). The split is in `splits/splits.csv`. The trained weights (`outputs/simple_cnn_best.pt`, 1.6 MB) are kept out of git.
+
+---
+
+## Phase 5: Proper evaluation
+
+### The confusion matrix: four kinds of outcome
+For every test cell, the model is either right or wrong, about an infected or a healthy cell:
+
+| | predicted healthy | predicted infected |
+|---|---|---|
+| **truly healthy** | true negative (TN): correctly cleared | false positive (FP): **false alarm**, a human re-checks |
+| **truly infected** | false negative (FN): **missed infection**, the dangerous one | true positive (TP): caught |
+
+**Where:** `src/evaluate.py` → `compute_metrics()` counts all four; `plot_confusion_matrices()` draws them.
+
+### The metrics, in words
+- **Recall (sensitivity)** = TP / (TP + FN): *of all infected cells, the share we caught.* Our top priority.
+- **Specificity** = TN / (TN + FP): *of all healthy cells, the share we correctly called healthy.*
+- **Precision** = TP / (TP + FP): *of all cells we called infected, the share that really were.*
+- **F1:** one number balancing precision and recall (low if either one is low).
+- **Accuracy** = (TP + TN) / all: *the share of all cells we got right.* It can hide a dangerous number of misses if healthy cells dominate, which is why we never look at it alone.
+
+**Where:** `compute_metrics()`. `tests/test_evaluate.py` checks each formula on a 7-cell example worked out by hand, deliberately lopsided so that every metric has a *different* value. A symmetric example once let a recall/specificity mix-up slip through.
+
+### The threshold and the precision-recall trade-off
+**What:** the model outputs a probability; the **threshold** turns it into a decision (probability ≥ threshold → "infected").
+**Analogy:** a smoke alarm's sensitivity dial. Turn it down (lower threshold) and it catches every fire, but also goes off when you make toast. Turn it up and the toast is fine, but a small fire might be missed.
+**For malaria:** a missed infection is far worse than a false alarm, so we lower the threshold until we catch at least 98% of infected cells, and accept more false alarms.
+**Where:** `choose_threshold_for_recall()` tries the infected cells' probabilities as thresholds, from highest to lowest, and keeps the **highest** one that reaches 98% recall: enough recall, with the fewest false alarms. (If recall is already above 98% at 0.5, this can even *raise* the threshold.)
+
+### Why the threshold is chosen on validation, never on test
+**Analogy:** if you set the pass mark *after* seeing the exam results, the pass rate tells you nothing about how the next class will do.
+If we tuned the threshold on the test set, the test score would be the best case for *those exact cells*, not an honest estimate for new patients. So: choose on validation, then measure on test **once**. Test recall may land a little below the 98% target. That's the honest number, and we report it as it is.
+**Where:** `evaluate_model()`: step 1 uses only `val_probabilities`; step 2 only measures `test_probabilities`.
+
+### The ROC curve and AUC
+**ROC curve:** recall (y) against false-alarm rate (x) for *every* possible threshold at once. Top-left corner = perfect; the diagonal = coin-flipping.
+**AUC** (area under that curve): the chance that a random infected cell gets a higher probability than a random healthy cell. 1.0 = perfect ranking, 0.5 = random. It doesn't depend on any single threshold.
+**Where:** `plot_roc_curve()`, using scikit-learn's `roc_curve` and `roc_auc_score`.
+
+### Looking at the mistakes
+**What:** a grid of misclassified test cells, the most confidently wrong first.
+**Why:** numbers tell you *how often* the model is wrong; pictures tell you *why*. Blurry images, odd stains or mislabelled cells all go into the README's "limitations".
+**Where:** `plot_misclassified()`.

@@ -146,8 +146,9 @@ def validate(
 
             # Sigmoid squashes any logit into a probability between 0 and 1.
             probabilities = torch.sigmoid(logits)  # (batch,)
-            # Above the threshold -> predict infected (1.0), else healthy (0.0).
-            predictions = (probabilities > config.DEFAULT_THRESHOLD).float()  # (batch,)
+            # At or above the threshold -> predict infected (1.0), else healthy (0.0).
+            # (Same rule as src/evaluate.py -> predict_infected().)
+            predictions = (probabilities >= config.DEFAULT_THRESHOLD).float()  # (batch,)
 
             batch_size = images.shape[0]
             total_loss += loss.item() * batch_size
