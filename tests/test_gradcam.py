@@ -13,6 +13,7 @@ Run them with:
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 from src import config, data, evaluate, gradcam, train
@@ -67,6 +68,42 @@ def test_gradcam_figures_are_made_for_both_models(tmp_path: Path) -> None:
     saved = gradcam.run_gradcam(split_table, data_dir, output_dir, output_dir, output_dir, CPU)
 
     names = sorted(path.name for path in saved)
-    assert names == ["resnet18_gradcam.png", "shared_mistakes_gradcam.png", "simple_cnn_gradcam.png"]
+    assert names == ["gradcam_checks.json", "resnet18_gradcam.png",
+                     "shared_mistakes_gradcam.png", "simple_cnn_gradcam.png"]
     for path in saved:
         assert path.stat().st_size > 0
+
+
+# ---------------------------------------------------------------------------
+# The rotation check
+# ---------------------------------------------------------------------------
+
+def blob_at(row: int, column: int, size: int = 8) -> np.ndarray:
+    """A made-up heatmap: all zero except one hot square at (row, column)."""
+    heatmap = np.zeros((size, size))
+    heatmap[row:row + 2, column:column + 2] = 1.0
+    return heatmap
+
+
+def test_heatmaps_that_turn_with_the_cell_pass_the_rotation_check() -> None:
+    # Original: heat at the top-left. Rotated cell: heat at the bottom-right,
+    # exactly where the top-left content ends up after a 180° turn.
+    original = np.stack([blob_at(1, 1)])
+    of_rotated = np.stack([np.rot90(blob_at(1, 1), k=2)])
+    agreement = gradcam.content_agreement(original, of_rotated)
+    assert agreement == pytest.approx(1.0)
+    assert gradcam.passes_check(agreement)
+
+
+def test_heatmaps_stuck_in_one_corner_fail_the_rotation_check() -> None:
+    # The ResNet18 "healthy" problem: heat at the bottom-right corner of the
+    # picture, whether the cell is rotated or not.
+    original = np.stack([blob_at(5, 5)])
+    of_rotated = np.stack([blob_at(5, 5)])
+    agreement = gradcam.content_agreement(original, of_rotated)
+    assert not gradcam.passes_check(agreement)
+
+
+def test_flat_heatmaps_are_skipped_by_the_rotation_check() -> None:
+    flat = np.zeros((1, 8, 8))
+    assert gradcam.content_agreement(flat, flat) == 0.0

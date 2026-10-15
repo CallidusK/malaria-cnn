@@ -216,6 +216,16 @@ GRADCAM_EXAMPLES_PER_GROUP: int = 4
 # Cells shown in the "both models got it wrong" figure.
 GRADCAM_SHARED_MISTAKES: int = 6
 
+# The rotation check: a heatmap that really shows the cell should turn with the
+# cell when the picture is rotated. We check this on up to this many test cells
+# per answer ("infected" / "healthy") and model...
+GRADCAM_CHECK_CELLS: int = 100
+# ...and only trust heatmaps whose agreement (a correlation: 1.0 = identical,
+# 0 = unrelated) is at least this. Found necessary in the Phase 7 recheck:
+# ResNet18's "why healthy?" heatmaps scored 0.00 (they always lit the picture's
+# bottom-right corner), while all the others scored above 0.9.
+GRADCAM_MIN_AGREEMENT: float = 0.5
+
 # ---------------------------------------------------------------------------
 # Speed benchmark (Phase 6 comparison)
 # ---------------------------------------------------------------------------

@@ -372,10 +372,29 @@ Even a barely-trained smoke-test ResNet18 lit up on the purple blob in most corr
 ### What the real heatmaps showed (test set, `results/*_gradcam.png`)
 Before drawing them, both models were re-evaluated on the laptop with the downloaded images: thresholds, AUC, missed infections and false alarms matched the Kaggle results **exactly**. So these heatmaps explain the same decisions we reported.
 
-- **Correctly caught infections: both models look at the parasite.** The heat sits right on the purple stained spot, in every example shown. That's what we hoped for. SimpleCNN's heatmaps are sharper (a 16×16 grid vs ResNet18's 7×7), so its hot spots are tighter.
-- **Correctly cleared healthy cells:** the "why healthy?" evidence is spread over the body of the cell, which makes sense: "healthy" means "no spot anywhere".
-- **False alarms: both models fire on purple spots** in cells labelled healthy. The models are doing what they learned; the question is what those spots are: a parasite the label missed, or a platelet or stain speck sitting on a healthy cell. Only an expert can say.
-- **Missed infections: there's no spot to find.** The heat is spread over the cell, just as for truly healthy cells, and to the eye most of these "infected" cells show no visible parasite.
-- **78 test cells fooled both models.** In 5 of the 6 shown, the label says infected but no parasite is visible; in the other, the label says healthy but two purple blobs are clearly there. This makes **label errors** a likely explanation for part of the "mistakes", though it doesn't prove it.
-- **One thing to keep an eye on:** some of ResNet18's "why healthy?" heatmaps peak at the **bottom-right corner, partly on the black background**, which shouldn't carry any information. It's weak, and most of the heat stays on the cell, but it could be a small shortcut (or an effect of ResNet18's coarse 7×7 grid). It goes in the README's limitations.
-- **Practical note:** Grad-CAM for both models on the full test set took about 15 minutes on the laptop. Most of that is predicting all 3,726 cells to find the examples.
+*(Corrected after a recheck: see "Lesson: check your explanations too" below.)*
+
+- **Correctly caught infections: the heat sits on the purple stained parasite**, for both models, in the examples shown. SimpleCNN's heatmaps are sharper (a 16×16 grid vs ResNet18's 7×7). One honest exception from the first run: a SimpleCNN cell called infected with p = 0.078 (only just above its very low 0.073 threshold) had its heat on a tiny speck at the image's corner, not on a clear parasite.
+- **"Why healthy?" heatmaps: trustworthy for SimpleCNN only.** SimpleCNN's spread over the body of the cell ("no spot anywhere"), and they pass the rotation check. ResNet18's do **not** pass it, so they're hidden (see below).
+- **False alarms: both models fire on purple spots** in cells labelled healthy. Whether those spots are a parasite the label missed, or a platelet or stain speck on a healthy cell, only an expert can say.
+- **Missed infections: there's no spot to find.** SimpleCNN's heat is spread over the cell, just as for truly healthy cells, and to the eye most of these "infected" cells show no clear parasite (one has faint marks in a pale centre).
+- **78 test cells fooled both models.** In 5 of the 6 shown, the label says infected but no clear parasite is visible; in the other, the label says healthy but two purple blobs are there. This makes **label errors** a likely explanation for part of the "mistakes", but it doesn't prove it.
+- **Practical note:** Grad-CAM for both models on the full test set, including the rotation check, takes about 15 to 20 minutes on the laptop.
+
+### Lesson: check your explanations too (the rotation check)
+**What happened:** at first, I described some of ResNet18's "why healthy?" heatmaps as peaking at the picture's bottom-right corner, and guessed it might be a shortcut. A guess isn't good enough, so we tested it.
+**The test:** rotate each cell 180° and run Grad-CAM again. A heatmap that shows something *in the cell* turns with the cell. A heatmap that sits at a fixed spot *of the picture* doesn't.
+**The results** (agreement after rotating back: 1.0 = perfectly turns with the cell, 0 = unrelated), from `results/gradcam_checks.json`:
+
+| | "why infected?" | "why healthy?" |
+|---|---|---|
+| SimpleCNN | 0.96 ✓ | 0.93 ✓ |
+| ResNet18 | 0.97 ✓ | **0.07 ✗** |
+
+In a first test on 300 cells, 91% of ResNet18's "why healthy?" heatmaps peaked in the bottom-right quarter **whether the cell was rotated or not**.
+**What it means:**
+- It is **not** a shortcut in ResNet18's *decisions*: rotating cells changed its probabilities by only 0.018 on average (3 of 300 decisions changed).
+- It **is** a failure of the *explanation*. "Healthy" means "no parasite anywhere", so there's no single place to point to. Grad-CAM then falls back on a quirk of how ResNet18's strided layers process the picture, which favours one corner. Those heatmaps say nothing about the cell.
+
+**The fix:** every kind of heatmap must now pass the rotation check (agreement ≥ 0.5, `GRADCAM_MIN_AGREEMENT` in `src/config.py`); failing ones are **hidden** in the figures, with a note saying why. **Where:** `src/gradcam.py` → `content_agreement()` and `rotation_check()`.
+**The bigger lesson:** an explanation method can be wrong too. Heatmaps look convincing whatever they show, so they need checking like any other result.

@@ -19,10 +19,17 @@ How Grad-CAM works, in plain words:
        only the positive part: a coarse heatmap (7x7), stretched to the image's
        size and laid over the cell. Red = "this pushed me towards my answer".
 
+Can we trust a heatmap? Not automatically. In the Phase 7 recheck, ResNet18's
+"why healthy?" heatmaps turned out to light up the picture's bottom-right corner
+for almost every cell, rotated or not: a quirk of the model's machinery, not
+evidence. So every kind of heatmap now has to pass a ROTATION CHECK: rotate the
+cell 180°, and the heat must move with it. Heatmaps that fail are hidden.
+
 What happens, in the order of this file:
     1. target_layer_for()      which layer's feature maps to use, per model
     2. choose_examples()       pick cells: caught, cleared, missed, false alarms
     3. compute_heatmaps()      Grad-CAM itself (using the grad-cam library)
+    3b. rotation_check()       does each kind of heatmap turn with the cell?
     4. plots                   one grid per model, plus the cells BOTH models got wrong
     5. run_gradcam()           all of the above, for every trained model found
 
@@ -179,6 +186,88 @@ def overlay(display_image: np.ndarray, heatmap: np.ndarray) -> np.ndarray:
 
 
 # ===========================================================================
+# 3b. The rotation check: can we trust a heatmap?
+# ===========================================================================
+
+def content_agreement(heatmaps: np.ndarray, heatmaps_of_rotated: np.ndarray) -> float:
+    """
+    How well heatmaps "turn with the cell" (1.0 = perfectly, 0 = not at all).
+
+    heatmaps:            Grad-CAM for the original cells          (num_cells, height, width)
+    heatmaps_of_rotated: Grad-CAM for the same cells rotated 180° (num_cells, height, width)
+
+    We rotate the second set back and measure how similar each pair is (a
+    correlation). If the heatmap shows something IN the cell, rotating the cell
+    moves the heat with it, so after rotating back the two match. If the heat
+    sits at a fixed spot of the picture whatever the cell looks like (a quirk of
+    the model's machinery, not evidence), they don't.
+    """
+    rotated_back = np.rot90(heatmaps_of_rotated, k=2, axes=(1, 2))
+    correlations = []
+    for original, returned in zip(heatmaps, rotated_back):
+        if original.std() == 0 or returned.std() == 0:
+            continue  # a completely flat heatmap has no "where", so it can't be compared
+        correlations.append(np.corrcoef(original.ravel(), returned.ravel())[0, 1])
+    if not correlations:
+        return 0.0
+    return float(np.mean(correlations))
+
+
+def rotation_check(
+    model: nn.Module,
+    test_rows: pd.DataFrame,
+    data_dir: Path,
+    image_size: int,
+    probabilities: np.ndarray,
+    threshold: float,
+    rng: np.random.Generator,
+) -> dict[str, float]:
+    """
+    Run the rotation check separately for cells the model called infected and
+    cells it called healthy, because the two kinds of heatmap can behave differently.
+    Returns {"infected": agreement, "healthy": agreement}.
+    """
+    called_infected = predict_infected(probabilities, threshold)
+    agreements = {}
+    for answer_name, answer in (("infected", 1), ("healthy", 0)):
+        candidates = np.where(called_infected == answer)[0]
+        chosen = rng.permutation(candidates)[:config.GRADCAM_CHECK_CELLS]
+        if len(chosen) == 0:
+            agreements[answer_name] = 0.0  # the model never gave this answer: nothing to check or show
+            continue
+        heatmaps = []
+        heatmaps_of_rotated = []
+        # Small chunks, so memory use stays low.
+        for start in range(0, len(chosen), config.BATCH_SIZE):
+            chunk = chosen[start:start + config.BATCH_SIZE]
+            images = load_model_inputs(test_rows, chunk, data_dir, image_size)  # (chunk, 3, size, size)
+            rotated = torch.rot90(images, k=2, dims=(2, 3))                        # each picture turned 180°
+            explain_labels = [answer] * len(chunk)
+            heatmaps.append(compute_heatmaps(model, images, explain_labels))
+            heatmaps_of_rotated.append(compute_heatmaps(model, rotated, explain_labels))
+        agreements[answer_name] = content_agreement(np.concatenate(heatmaps), np.concatenate(heatmaps_of_rotated))
+    return agreements
+
+
+def passes_check(agreement: float) -> bool:
+    """True if heatmaps of this kind can be trusted (they turn with the cell)."""
+    return agreement >= config.GRADCAM_MIN_AGREEMENT
+
+
+def answer_for_group(group: str) -> str:
+    """Which answer the model gave for a group of cells: caught and false alarms were called infected."""
+    if group in ("caught", "false_alarm"):
+        return "infected"
+    return "healthy"
+
+
+def show_hidden_heatmap(axis: plt.Axes) -> None:
+    """Draw a short note instead of a heatmap that failed the rotation check."""
+    axis.text(0.5, 0.5, "heatmap hidden:\nfailed the\nrotation check", ha="center", va="center",
+              fontsize=9, transform=axis.transAxes)
+
+
+# ===========================================================================
 # 4. Plots
 # ===========================================================================
 
@@ -191,19 +280,30 @@ def plot_model_gradcam(
     data_dir: Path,
     probabilities: np.ndarray,
     threshold: float,
+    agreements: dict[str, float],
     path: Path,
 ) -> None:
-    """One grid per model: a row per group, each cell shown as original | heatmap."""
+    """
+    One grid per model: a row per group, each cell shown as original | heatmap.
+    Each row shows the rotation check for its kind of heatmap; failing heatmaps are hidden.
+    """
     per_group = config.GRADCAM_EXAMPLES_PER_GROUP
     figure = plt.figure(figsize=(2.2 * 2 * per_group, 2.9 * len(GROUP_TITLES)), layout="constrained")
     figure.suptitle(f"{DISPLAY_NAMES[model_name]}: where the model looked (threshold {threshold:.3f}). "
-                    "Red = pushed the model towards its answer. p = predicted probability of infection.",
+                    "Red = pushed the model towards its answer. p = predicted probability of infection.\n"
+                    f"Rotation check: does the heatmap turn with the cell? (1.0 = perfectly; "
+                    f"below {config.GRADCAM_MIN_AGREEMENT} = not trusted, so hidden)",
                     fontsize=13)
     row_figures = figure.subfigures(len(GROUP_TITLES), 1)
 
     for row_figure, (group, group_title) in zip(row_figures, GROUP_TITLES.items()):
         indices = examples[group]
-        row_figure.suptitle(f"{group_title} ({len(indices)} shown)", fontweight="bold")
+        answer = answer_for_group(group)
+        agreement = agreements[answer]
+        verdict = "trusted" if passes_check(agreement) else "NOT trusted"
+        row_figure.suptitle(f"{group_title} ({len(indices)} shown). "
+                            f"Rotation check for '{answer}' answers: {agreement:.2f}, {verdict}",
+                            fontweight="bold")
         axes = row_figure.subplots(1, 2 * per_group)
         for axis in axes:
             axis.axis("off")
@@ -221,8 +321,11 @@ def plot_model_gradcam(
             heatmap_axis = axes[2 * position + 1]
             original_axis.imshow(display_image)
             original_axis.set_title(f"p = {probabilities[index]:.3f}", fontsize=10)
-            heatmap_axis.imshow(overlay(display_image, heatmaps[position]))
-            heatmap_axis.set_title("heatmap", fontsize=10)
+            if passes_check(agreement):
+                heatmap_axis.imshow(overlay(display_image, heatmaps[position]))
+                heatmap_axis.set_title("heatmap", fontsize=10)
+            else:
+                show_hidden_heatmap(heatmap_axis)
 
     figure.savefig(path, dpi=100)
     plt.close(figure)
@@ -280,9 +383,15 @@ def plot_shared_mistakes(
         axes[row, 0].imshow(display_image)
         axes[row, 0].set_title(f"labelled {label_name}", fontsize=10)
         for column, model_name in enumerate(model_names, start=1):
-            probability = results_by_model[model_name]["probabilities"][index]
-            axes[row, column].imshow(overlay(display_image, heatmaps_by_model[model_name][row]))
+            results = results_by_model[model_name]
+            probability = results["probabilities"][index]
+            # Every model got this cell wrong, so its answer is the opposite of the label.
+            answer = "healthy" if labels[index] == config.LABEL_PARASITIZED else "infected"
             axes[row, column].set_title(f"{DISPLAY_NAMES[model_name]}: p = {probability:.3f}", fontsize=10)
+            if passes_check(results["agreements"][answer]):
+                axes[row, column].imshow(overlay(display_image, heatmaps_by_model[model_name][row]))
+            else:
+                show_hidden_heatmap(axes[row, column])
 
     figure.savefig(path, dpi=100)
     plt.close(figure)
@@ -329,16 +438,21 @@ def run_gradcam(
         test_loader = get_dataloaders(split_table, data_dir, image_size)["test"]
         probabilities, labels = predict_probabilities(model, test_loader, device)
 
+        agreements = rotation_check(model, test_rows, data_dir, image_size, probabilities, threshold, rng)
+        for answer, agreement in agreements.items():
+            verdict = "trusted" if passes_check(agreement) else "NOT trusted, hidden in the figures"
+            print(f"  rotation check, '{answer}' heatmaps: {agreement:.2f} ({verdict})")
+
         examples = choose_examples(labels, probabilities, threshold, config.GRADCAM_EXAMPLES_PER_GROUP, rng)
         figure_path = output_dir / f"{model_name}_gradcam.png"
         plot_model_gradcam(model_name, model, image_size, examples, test_rows, data_dir,
-                           probabilities, threshold, figure_path)
+                           probabilities, threshold, agreements, figure_path)
         print(f"  saved {figure_path}")
         saved_paths.append(figure_path)
 
         results_by_model[model_name] = {
             "model": model, "image_size": image_size, "threshold": threshold,
-            "probabilities": probabilities, "labels": labels,
+            "probabilities": probabilities, "labels": labels, "agreements": agreements,
         }
 
     if len(results_by_model) >= 2:
@@ -346,6 +460,19 @@ def run_gradcam(
         num_shared = plot_shared_mistakes(results_by_model, test_rows, data_dir, shared_path)
         print(f"Cells every model got wrong: {num_shared}. Saved {shared_path}")
         saved_paths.append(shared_path)
+
+    # Save the rotation-check scores, so the figures' trust labels can be traced back.
+    checks = {}
+    for model_name, results in results_by_model.items():
+        checks[model_name] = {
+            "agreement_for_infected_answers": results["agreements"]["infected"],
+            "agreement_for_healthy_answers": results["agreements"]["healthy"],
+            "minimum_to_trust": config.GRADCAM_MIN_AGREEMENT,
+            "cells_checked_per_answer": config.GRADCAM_CHECK_CELLS,
+        }
+    checks_path = output_dir / "gradcam_checks.json"
+    checks_path.write_text(json.dumps(checks, indent=2))
+    saved_paths.append(checks_path)
     return saved_paths
 
 

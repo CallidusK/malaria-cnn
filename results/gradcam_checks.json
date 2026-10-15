@@ -1,0 +1,14 @@
+{
+  "simple_cnn": {
+    "agreement_for_infected_answers": 0.9565661210487373,
+    "agreement_for_healthy_answers": 0.9275257800910559,
+    "minimum_to_trust": 0.5,
+    "cells_checked_per_answer": 100
+  },
+  "resnet18": {
+    "agreement_for_infected_answers": 0.9696345386148626,
+    "agreement_for_healthy_answers": 0.0738653797278641,
+    "minimum_to_trust": 0.5,
+    "cells_checked_per_answer": 100
+  }
+}
