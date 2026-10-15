@@ -1,6 +1,6 @@
 # Malaria Cell Classifier
 
-*Made with ❤️ by Calli*
+*Made with ❤️ by Calli · Part of the AI for Engineers Coursework*
 
 A convolutional neural network (CNN) that looks at a microscope image of **one red blood cell** and says whether it is **Parasitized** (malaria-infected) or **Uninfected** (healthy).
 
@@ -153,7 +153,7 @@ More: [`results/simple_cnn_gradcam.png`](results/simple_cnn_gradcam.png), [`resu
 ### Setup (laptop)
 
 ```bash
-git clone <this repository> malaria-cnn
+git clone https://github.com/CallidusK/malaria-cnn.git
 cd malaria-cnn
 python3 -m venv .venv
 source .venv/bin/activate
@@ -212,7 +212,7 @@ Model weights are not stored in the repository itself. They belong in a **GitHub
 
 **To publish them** (repository owner): on the repository's GitHub page, go to **Releases → Draft a new release**, create a tag (e.g. `v1.0`), attach both `.pt` files from `outputs/`, and publish.
 
-**To use them:** download both files from the release page into `outputs/`.
+**To use them:** download both files from the [releases page](https://github.com/CallidusK/malaria-cnn/releases) into `outputs/`.
 
 ## Limitations
 
