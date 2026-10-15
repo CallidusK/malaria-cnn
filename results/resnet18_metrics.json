@@ -1,0 +1,44 @@
+{
+  "model_name": "resnet18",
+  "checkpoint_epoch": 20,
+  "target_recall": 0.98,
+  "tuned_threshold": 0.19970907270908356,
+  "validation_at_tuned_threshold": {
+    "threshold": 0.19970907270908356,
+    "accuracy": 0.9784888410863135,
+    "precision": 0.9750692520775623,
+    "recall": 0.9805013927576601,
+    "specificity": 0.9766112266112266,
+    "f1": 0.9777777777777777,
+    "true_positives": 1760,
+    "false_negatives": 35,
+    "true_negatives": 1879,
+    "false_positives": 45
+  },
+  "test_at_default_threshold": {
+    "threshold": 0.5,
+    "accuracy": 0.9683306494900698,
+    "precision": 0.9808641975308642,
+    "recall": 0.948090692124105,
+    "specificity": 0.9848780487804878,
+    "f1": 0.9641990291262136,
+    "true_positives": 1589,
+    "false_negatives": 87,
+    "true_negatives": 2019,
+    "false_positives": 31
+  },
+  "test_at_tuned_threshold": {
+    "threshold": 0.19970907270908356,
+    "accuracy": 0.9691358024691358,
+    "precision": 0.961015948021264,
+    "recall": 0.970763723150358,
+    "specificity": 0.9678048780487805,
+    "f1": 0.9658652419115463,
+    "true_positives": 1627,
+    "false_negatives": 49,
+    "true_negatives": 1984,
+    "false_positives": 66
+  },
+  "test_roc_auc": 0.9944077070842307,
+  "num_test_images": 3726
+}

@@ -326,3 +326,21 @@ ROC-AUC 0.985. Full numbers: `results/simple_cnn_metrics.json`.
 
 ### Downloading pretrained weights on a Mac
 Python installed from python.org on macOS can fail to download with `CERTIFICATE_VERIFY_FAILED` until its one-time certificate setup is run (`Install Certificates.command`, in the Python folder under Applications). Kaggle (Linux) doesn't have this problem.
+
+### What the real Phase 6 results showed
+Full table: `results/comparison.md` (rebuilt locally from the result files, and identical to the one made on Kaggle).
+
+| tuned thresholds (test set, 29 patients) | SimpleCNN | ResNet18 |
+|---|---|---|
+| missed infections | 61 | 49 |
+| false alarms | 245 | 66 |
+| specificity | 88.1% | 96.8% |
+| ROC-AUC | 0.985 | 0.994 |
+| size of the weights | 1.6 MB | 44.7 MB |
+| cells per second (T4 GPU) | 5,089 | 1,247 |
+
+- **The biggest win was false alarms, not missed infections.** ResNet18 separates the two classes more cleanly (higher AUC), so it only had to lower its threshold to 0.20 to reach 98% validation recall. SimpleCNN had to go all the way down to 0.073, and paid with 3.7× more false alarms.
+- **Small differences on one test set deserve caution.** 61 vs 49 missed infections, on 29 patients, is modest. The AUC and false-alarm gaps are larger and more convincing.
+- **The price:** 29× more parameters and about 4× slower. Speed measurements vary by a few percent between runs (one run measured 4,988 / 1,171 cells per second), but the ratio stays the same. Speed on a laptop *CPU*, which a clinic might have, has **not** been measured.
+- **Fine-tuning is where transfer learning pays off:** in the frozen stage, validation loss only reached about 0.24; one epoch of fine-tuning took it to about 0.10 (`results/resnet18_curves.png`, dashed line).
+- **Both models get the same cells "wrong".** Several of ResNet18's most confident mistakes are the very images SimpleCNN got wrong: "infected" cells with no visible parasite, and "healthy" cells with purple spots. Two very different models confidently disagreeing with the same labels makes label errors more plausible, though only an expert could confirm it.
