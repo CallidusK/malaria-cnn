@@ -45,7 +45,7 @@ else:
 RESULTS_DIR: Path = PROJECT_ROOT / "results"
 
 # The train/val/test split, saved once and reused by every later step, so
-# training, evaluation and the ResNet18 comparison all use the SAME test patients.
+# training, evaluation and Grad-CAM all use the SAME test patients.
 # The real split is committed to git; the fake one is regenerated with the fake data.
 SPLITS_CSV: Path = PROJECT_ROOT / "splits" / "splits.csv"
 FAKE_SPLITS_CSV: Path = FAKE_DATA_DIR / "splits.csv"
@@ -95,7 +95,6 @@ TEST_FRACTION: float = 0.15   # touched once, at the very end, for honest scores
 # Every image is resized to a square of this many pixels per side.
 # Real cell images range from about 46 to 395 pixels, so we must pick one size.
 SIMPLE_CNN_IMAGE_SIZE: int = 128  # small enough to train fast, big enough to see the parasite
-RESNET_IMAGE_SIZE: int = 224      # ResNet18 was pretrained on 224x224 images
 
 # Number of colour channels: red, green, blue.
 NUM_CHANNELS: int = 3
@@ -103,9 +102,9 @@ NUM_CHANNELS: int = 3
 # Normalisation: shift and scale each colour channel so values sit around 0
 # instead of 0..1. Networks train faster and more stably on centred inputs.
 # These are the average (mean) and spread (std) of red, green and blue over the
-# ImageNet photo collection. ResNet18 REQUIRES them, because it was pretrained
-# on images normalised this way; we use them for SimpleCNN too, so both models
-# see identically prepared images.
+# ImageNet photo collection (1.2 million everyday photos): a standard, widely used
+# choice. Don't change them now: the trained SimpleCNN was trained on images
+# normalised exactly this way, and expects the same at prediction time.
 NORMALISE_MEAN: tuple[float, float, float] = (0.485, 0.456, 0.406)
 NORMALISE_STD: tuple[float, float, float] = (0.229, 0.224, 0.225)
 
@@ -189,55 +188,24 @@ else:
     NUM_DATA_WORKERS: int = 0
 
 # ---------------------------------------------------------------------------
-# Transfer learning (ResNet18, Phase 6)
-# ---------------------------------------------------------------------------
-
-# "Transfer learning" = start from a model already trained on another big
-# dataset (ImageNet: 1.2 million everyday photos) instead of from random weights.
-
-# The number of features ResNet18 produces just before its last layer.
-RESNET_FEATURE_SIZE: int = 512
-
-# Stage 1, "frozen": the pretrained layers are locked; only our new last layer
-# learns. It starts random, so it can take normal-sized steps.
-FROZEN_EPOCHS: int = 3
-RESNET_HEAD_LEARNING_RATE: float = 1e-3
-
-# Stage 2, "fine-tune": everything learns, with small steps so we adjust the
-# pretrained knowledge gently instead of wrecking it.
-FINE_TUNE_LEARNING_RATE: float = 1e-4
-# Weight decay: a gentle pull of every weight towards zero on each step,
-# which discourages extreme weights (a mild guard against overfitting).
-# 0.01 is AdamW's standard default.
-FINE_TUNE_WEIGHT_DECAY: float = 0.01
-
-# ---------------------------------------------------------------------------
 # Grad-CAM heatmaps (Phase 7)
 # ---------------------------------------------------------------------------
 
-# Cells shown per group (caught, cleared, missed, false alarm) in each model's grid.
+# Cells shown per group (caught, cleared, missed, false alarm) in the grid.
 GRADCAM_EXAMPLES_PER_GROUP: int = 4
-# Cells shown in the "both models got it wrong" figure.
-GRADCAM_SHARED_MISTAKES: int = 6
+
+# Cells are DRAWN at this size in the figures (bigger than the model's 128x128),
+# so a small parasite and the heat on it are easy to see.
+GRADCAM_DISPLAY_SIZE: int = 224
 
 # The rotation check: a heatmap that really shows the cell should turn with the
 # cell when the picture is rotated. We check this on up to this many test cells
-# per answer ("infected" / "healthy") and model...
+# per answer ("infected" / "healthy")...
 GRADCAM_CHECK_CELLS: int = 100
 # ...and only trust heatmaps whose agreement (a correlation: 1.0 = identical,
-# 0 = unrelated) is at least this. Found necessary in the Phase 7 recheck:
-# ResNet18's "why healthy?" heatmaps scored 0.00 (they always lit the picture's
-# bottom-right corner), while all the others scored above 0.9.
+# 0 = unrelated) is at least this. Heatmaps that sit at one fixed spot of the
+# picture, whatever the cell shows, score close to 0; SimpleCNN's score above 0.9.
 GRADCAM_MIN_AGREEMENT: float = 0.5
-
-# ---------------------------------------------------------------------------
-# Speed benchmark (Phase 6 comparison)
-# ---------------------------------------------------------------------------
-
-# Time the model on this many batches of BATCH_SIZE images, after a few
-# untimed "warm-up" batches (the first batches are slow while the GPU gets set up).
-SPEED_WARMUP_BATCHES: int = 5
-SPEED_TIMED_BATCHES: int = 20
 
 # ---------------------------------------------------------------------------
 # Evaluation (Phase 5)

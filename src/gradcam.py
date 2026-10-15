@@ -11,26 +11,26 @@ background, the model learned a shortcut, and its scores can't be trusted.
 
 How Grad-CAM works, in plain words:
     1. The image goes through the model, and we keep the feature maps of its
-       last convolutional layer (e.g. ResNet18: 512 maps of 7x7). Each map shows
+       last convolutional layer (SimpleCNN: 256 maps of 16x16). Each map shows
        where one learned pattern appears in the cell.
     2. We ask: if a map got a little stronger, how much would the model's answer
        change? (That's the map's gradient.) Maps that push the answer up matter.
     3. Add the maps together, each weighted by how much it matters, and keep
-       only the positive part: a coarse heatmap (7x7), stretched to the image's
+       only the positive part: a coarse heatmap (16x16), stretched to the image's
        size and laid over the cell. Red = "this pushed me towards my answer".
 
-Can we trust a heatmap? Not automatically. In the Phase 7 recheck, ResNet18's
-"why healthy?" heatmaps turned out to light up the picture's bottom-right corner
-for almost every cell, rotated or not: a quirk of the model's machinery, not
-evidence. So every kind of heatmap now has to pass a ROTATION CHECK: rotate the
-cell 180°, and the heat must move with it. Heatmaps that fail are hidden.
+Can we trust a heatmap? Not automatically. A heatmap can light up the same
+spot of the picture (say, its bottom-right corner) for almost every cell, rotated
+or not: a quirk of the model's machinery, not evidence about the cell. So every
+kind of heatmap has to pass a ROTATION CHECK: rotate the cell 180°, and the heat
+must move with it. Heatmaps that fail are hidden.
 
 What happens, in the order of this file:
-    1. target_layer_for()      which layer's feature maps to use, per model
+    1. target_layer_for()      which layer's feature maps to use
     2. choose_examples()       pick cells: caught, cleared, missed, false alarms
     3. compute_heatmaps()      Grad-CAM itself (using the grad-cam library)
     3b. rotation_check()       does each kind of heatmap turn with the cell?
-    4. plots                   one grid per model, plus the cells BOTH models got wrong
+    4. plot_model_gradcam()    one grid of examples, each shown as cell | heatmap
     5. run_gradcam()           all of the above, for every trained model found
 
 How to run it:
@@ -58,7 +58,6 @@ from pytorch_grad_cam.utils.model_targets import BinaryClassifierOutputTarget
 from torch import nn
 
 from src import config
-from src.compare import DISPLAY_NAMES
 from src.data import (
     MalariaDataset,
     build_eval_transform,
@@ -67,8 +66,11 @@ from src.data import (
     load_or_create_splits,
 )
 from src.evaluate import load_checkpoint, predict_infected, predict_probabilities
-from src.models import MODEL_NAMES, ResNet18Classifier, SimpleCNN
+from src.models import MODEL_NAMES, SimpleCNN
 from src.utils import get_device, set_seed
+
+# How each model's name is written in figure titles.
+DISPLAY_NAMES: dict[str, str] = {"simple_cnn": "SimpleCNN"}
 
 # The four groups of cells in each model's grid, in display order.
 GROUP_TITLES: dict[str, str] = {
@@ -78,8 +80,8 @@ GROUP_TITLES: dict[str, str] = {
     "false_alarm": "False alarms (labelled healthy, called infected)",
 }
 
-# Every cell is drawn at this size, whichever model looked at it.
-DISPLAY_SIZE = config.RESNET_IMAGE_SIZE
+# Every cell is drawn at this size (see config.py).
+DISPLAY_SIZE = config.GRADCAM_DISPLAY_SIZE
 
 
 # ===========================================================================
@@ -95,9 +97,6 @@ def target_layer_for(model: nn.Module) -> nn.Module:
         # Block 4's ReLU output: 256 maps of 16x16 (for 128x128 input), taken just
         # BEFORE the final pooling halves them to 8x8. A finer grid = a sharper heatmap.
         return model.block4.relu
-    if isinstance(model, ResNet18Classifier):
-        # layer4: ResNet18's last convolutional stage, 512 maps of 7x7 (for 224x224 input).
-        return model.backbone.layer4
     raise ValueError(f"No Grad-CAM layer defined for {type(model).__name__}")
 
 
@@ -284,7 +283,7 @@ def plot_model_gradcam(
     path: Path,
 ) -> None:
     """
-    One grid per model: a row per group, each cell shown as original | heatmap.
+    One grid for the model: a row per group, each cell shown as original | heatmap.
     Each row shows the rotation check for its kind of heatmap; failing heatmaps are hidden.
     """
     per_group = config.GRADCAM_EXAMPLES_PER_GROUP
@@ -331,73 +330,6 @@ def plot_model_gradcam(
     plt.close(figure)
 
 
-def plot_shared_mistakes(
-    results_by_model: dict[str, dict], test_rows: pd.DataFrame, data_dir: Path, path: Path
-) -> int:
-    """
-    Cells that EVERY model got wrong: one row per cell, showing
-    original | each model's heatmap. Returns how many shared mistakes there were.
-    """
-    labels = None
-    wrong_for_all = None
-    for results in results_by_model.values():
-        predictions = predict_infected(results["probabilities"], results["threshold"])
-        is_wrong = predictions != results["labels"]
-        if wrong_for_all is None:
-            wrong_for_all = is_wrong
-            labels = results["labels"]
-        else:
-            wrong_for_all = wrong_for_all & is_wrong
-    shared_indices = np.where(wrong_for_all)[0]
-
-    # Most confidently wrong first, judged by the last model (ResNet18).
-    last_results = list(results_by_model.values())[-1]
-    wrongness = np.abs(last_results["probabilities"][shared_indices] - labels[shared_indices])
-    shown_indices = shared_indices[np.argsort(-wrongness)][:config.GRADCAM_SHARED_MISTAKES]
-
-    model_names = list(results_by_model)
-    num_columns = 1 + len(model_names)
-    num_rows = max(len(shown_indices), 1)
-    figure, axes = plt.subplots(num_rows, num_columns, figsize=(3 * num_columns, 3 * num_rows + 0.8),
-                                squeeze=False, layout="constrained")
-    figure.suptitle(f"Cells every model got wrong: {len(shared_indices)} in total, "
-                    f"{len(shown_indices)} shown\n(red = pushed the model towards its answer)", fontsize=12)
-    for axis in axes.flat:
-        axis.axis("off")
-    if len(shown_indices) == 0:
-        axes[0, 0].text(0, 0.5, "none", va="center", fontsize=12)
-        figure.savefig(path, dpi=100)
-        plt.close(figure)
-        return 0
-
-    # One model at a time: compute its heatmaps for all shown cells at once.
-    heatmaps_by_model = {}
-    for model_name, results in results_by_model.items():
-        images = load_model_inputs(test_rows, shown_indices, data_dir, results["image_size"])
-        explain_labels = predict_infected(results["probabilities"][shown_indices], results["threshold"]).tolist()
-        heatmaps_by_model[model_name] = compute_heatmaps(results["model"], images, explain_labels)
-
-    for row, index in enumerate(shown_indices):
-        display_image = load_display_image(data_dir / test_rows["path"].iloc[index])
-        label_name = "infected" if labels[index] == config.LABEL_PARASITIZED else "healthy"
-        axes[row, 0].imshow(display_image)
-        axes[row, 0].set_title(f"labelled {label_name}", fontsize=10)
-        for column, model_name in enumerate(model_names, start=1):
-            results = results_by_model[model_name]
-            probability = results["probabilities"][index]
-            # Every model got this cell wrong, so its answer is the opposite of the label.
-            answer = "healthy" if labels[index] == config.LABEL_PARASITIZED else "infected"
-            axes[row, column].set_title(f"{DISPLAY_NAMES[model_name]}: p = {probability:.3f}", fontsize=10)
-            if passes_check(results["agreements"][answer]):
-                axes[row, column].imshow(overlay(display_image, heatmaps_by_model[model_name][row]))
-            else:
-                show_hidden_heatmap(axes[row, column])
-
-    figure.savefig(path, dpi=100)
-    plt.close(figure)
-    return len(shared_indices)
-
-
 # ===========================================================================
 # 5. Put it all together
 # ===========================================================================
@@ -423,7 +355,7 @@ def run_gradcam(
     test_rows = split_table[split_table["split"] == "test"].reset_index(drop=True)  # same order as the loader
     rng = np.random.default_rng(config.RANDOM_SEED)
     saved_paths = []
-    results_by_model = {}
+    checks = {}  # each model's rotation-check scores
 
     for model_name in MODEL_NAMES:
         checkpoint_path = checkpoint_dir / f"{model_name}_best.pt"
@@ -450,26 +382,14 @@ def run_gradcam(
         print(f"  saved {figure_path}")
         saved_paths.append(figure_path)
 
-        results_by_model[model_name] = {
-            "model": model, "image_size": image_size, "threshold": threshold,
-            "probabilities": probabilities, "labels": labels, "agreements": agreements,
-        }
-
-    if len(results_by_model) >= 2:
-        shared_path = output_dir / "shared_mistakes_gradcam.png"
-        num_shared = plot_shared_mistakes(results_by_model, test_rows, data_dir, shared_path)
-        print(f"Cells every model got wrong: {num_shared}. Saved {shared_path}")
-        saved_paths.append(shared_path)
-
-    # Save the rotation-check scores, so the figures' trust labels can be traced back.
-    checks = {}
-    for model_name, results in results_by_model.items():
         checks[model_name] = {
-            "agreement_for_infected_answers": results["agreements"]["infected"],
-            "agreement_for_healthy_answers": results["agreements"]["healthy"],
+            "agreement_for_infected_answers": agreements["infected"],
+            "agreement_for_healthy_answers": agreements["healthy"],
             "minimum_to_trust": config.GRADCAM_MIN_AGREEMENT,
             "cells_checked_per_answer": config.GRADCAM_CHECK_CELLS,
         }
+
+    # Save the rotation-check scores, so the figures' trust labels can be traced back.
     checks_path = output_dir / "gradcam_checks.json"
     checks_path.write_text(json.dumps(checks, indent=2))
     saved_paths.append(checks_path)

@@ -13,7 +13,7 @@
 #     matplotlib 3.10.0, tqdm 4.67.3
 
 torch>=2.2            # deep learning: tensors, layers, training
-torchvision>=0.17     # image transforms and the pretrained ResNet18
+torchvision>=0.17     # image transforms (resize, flip, rotate, normalise)
 numpy>=1.26           # fast number arrays
 pandas>=2.1           # tables of file paths, labels and patient IDs
 Pillow>=10.0          # opens .png image files

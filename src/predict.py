@@ -14,8 +14,8 @@ Which threshold? By default, the TUNED threshold from Phase 5
 infection is worse than a false alarm. --threshold overrides it.
 
 How to run it:
-    python -m src.predict --weights outputs/resnet18_best.pt --image cell.png
-    python -m src.predict --weights outputs/resnet18_best.pt --folder my_cells/ --output-csv predictions.csv
+    python -m src.predict --weights outputs/simple_cnn_best.pt --image cell.png
+    python -m src.predict --weights outputs/simple_cnn_best.pt --folder my_cells/ --output-csv predictions.csv
 """
 
 import argparse
@@ -119,7 +119,7 @@ def predict_files(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Classify red blood cell images as Parasitized or Uninfected.")
     parser.add_argument("--weights", type=Path, required=True,
-                        help="Trained model file, e.g. outputs/resnet18_best.pt")
+                        help="Trained model file, e.g. outputs/simple_cnn_best.pt")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--image", type=Path, help="One cell image")
     source.add_argument("--folder", type=Path, help="A folder of cell images")

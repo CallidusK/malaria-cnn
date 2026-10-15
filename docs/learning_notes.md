@@ -53,7 +53,7 @@ Each note points to the file (and function) where the idea lives in the code.
 
 ### Why image size matters
 **What:** a CNN needs every input image to be the same size, so we resize them all.
-**Why:** too small and the parasite blurs away; too big and training is slow for no gain. The size histogram shows what we're starting from. Our choice (128×128 for our CNN, 224×224 for ResNet18) lives in `src/config.py`.
+**Why:** too small and the parasite blurs away; too big and training is slow for no gain. The size histogram shows what we're starting from. Our choice (128×128) lives in `src/config.py`.
 **Where:** notebook section 7, function `image_width_height()`.
 
 ### Data leakage (patient leakage)
@@ -95,7 +95,7 @@ Each note points to the file (and function) where the idea lives in the code.
 
 ### Saving the split (`splits.csv`)
 **What:** the split is made once, written to a CSV file, and reloaded on every later run.
-**Why:** training, evaluation and the ResNet18 comparison must all be judged on the *same* test patients, otherwise comparing their scores is meaningless.
+**Why:** training, evaluation and Grad-CAM must all use the *same* test patients. If the split changed between runs, test patients could leak into training, and the reported scores would no longer mean anything.
 **Where:** `src/data.py` → `load_or_create_splits()`. Real split: `splits/splits.csv` (committed to git). Fake split: `data/fake/splits.csv`.
 
 ### Data augmentation
@@ -106,7 +106,7 @@ Each note points to the file (and function) where the idea lives in the code.
 
 ### Normalisation
 **What:** shifting and scaling each colour channel so the values are centred around 0 (roughly -2 to +2) instead of 0 to 1.
-**Why:** networks learn faster and more stably when inputs are centred. We use ImageNet's mean and std because ResNet18 needs exactly those, and using the same for SimpleCNN keeps both models' inputs identical.
+**Why:** networks learn faster and more stably when inputs are centred. We use ImageNet's mean and std (measured over 1.2 million everyday photos), a standard choice. The trained model expects exactly these values, so they must not change after training.
 **Where:** `transforms.Normalize(...)` in `src/data.py`; the values are `NORMALISE_MEAN` and `NORMALISE_STD` in `src/config.py`.
 
 ### Dataset and DataLoader
@@ -298,52 +298,9 @@ ROC-AUC 0.985. Full numbers: `results/simple_cnn_metrics.json`.
 
 ---
 
-## Phase 6: Transfer learning (ResNet18) and comparison
+## Phase 6: (dropped)
 
-### Transfer learning
-**What:** instead of starting from random weights, start from a model already trained on a huge dataset (ResNet18 on ImageNet: 1.2 million everyday photos), and adapt it to our task.
-**Why it helps, even though ImageNet has no blood cells:** a CNN's early layers learn *general* visual building blocks (edges, textures, colour blobs, round shapes) that are useful for almost any image. Only the last layers are specific to dogs-vs-cars. We keep the general knowledge and retrain the specific part.
-**Analogy:** hiring an experienced photographer to learn microscopy, instead of someone who has never looked at an image. They still need training, but they already know how to *see*.
-**We saw it happen:** in the overfit check, pretrained ResNet18 memorised 16 cells in about 10 steps; SimpleCNN from scratch needed about 40.
-**Where:** `src/models.py` → `ResNet18Classifier`. Its last layer (`fc`: 512 features → 1,000 ImageNet classes) is replaced by `Linear(512 → 1)`.
-
-### Freezing, then fine-tuning
-**Stage 1, frozen** (3 epochs): every pretrained weight is locked (`requires_grad = False`); only the new last layer (513 numbers) learns.
-**Why first:** the new layer starts random. If everything learned at once, its large, random errors would send large, damaging updates back through the pretrained layers and wreck what they knew.
-**Stage 2, fine-tune:** everything unlocks (11.2 million numbers), with a 10× smaller learning rate (1e-4) and **AdamW** (Adam + *weight decay*, a gentle pull of every weight towards zero). Small steps adjust the pretrained knowledge to blood cells without throwing it away.
-**Where:** `src/train.py` → `train_model()` (the two stages) and `run_training_stage()` (the epoch loop, shared with SimpleCNN). Helpers: `freeze_pretrained_layers()`, `unfreeze_all_layers()` in `src/models.py`.
-
-### The BatchNorm trap
-**What:** freezing weights does **not** freeze BatchNorm's *running statistics* (the average and spread it keeps for evaluation mode). In training mode they keep updating from every batch, so "frozen" layers would quietly change anyway.
-**Fix:** during the frozen stage, the BatchNorm layers are switched back to evaluation mode right after `model.train()`.
-**Where:** `keep_batchnorm_statistics_frozen()` in `src/models.py`, used by `train_one_epoch(..., batchnorm_frozen=True)`. A test checks that a real frozen training epoch leaves the statistics untouched. A first version of that test only checked the helper function, and **missed** a deliberately broken training loop; the improved test catches it.
-
-### Comparing models fairly
-**What:** `results/comparison.md` puts both models side by side: size, training time, speed, and test results at both thresholds.
-**Fair means:** the same 29 test patients, thresholds tuned on validation only, and speed measured on the same GPU. `src/compare.py` *refuses* to compare models tested on different test sets.
-**Not only accuracy:** a model for a clinic laptop must also be small and fast. ResNet18 has about 29× more parameters than SimpleCNN, and works on images about 3× larger (224×224 vs 128×128 pixels), so expect it to be slower per cell.
-**Where:** `src/compare.py` → `benchmark_inference_speed()` (cells per second, using random images, since speed doesn't depend on what the weights learned) and `write_comparison()` (the table, built only from result files).
-
-### Downloading pretrained weights on a Mac
-Python installed from python.org on macOS can fail to download with `CERTIFICATE_VERIFY_FAILED` until its one-time certificate setup is run (`Install Certificates.command`, in the Python folder under Applications). Kaggle (Linux) doesn't have this problem.
-
-### What the real Phase 6 results showed
-Full table: `results/comparison.md` (rebuilt locally from the result files, and identical to the one made on Kaggle).
-
-| tuned thresholds (test set, 29 patients) | SimpleCNN | ResNet18 |
-|---|---|---|
-| missed infections | 61 | 49 |
-| false alarms | 245 | 66 |
-| specificity | 88.1% | 96.8% |
-| ROC-AUC | 0.985 | 0.994 |
-| size of the weights | 1.6 MB | 44.7 MB |
-| cells per second (T4 GPU) | 5,089 | 1,247 |
-
-- **The biggest win was false alarms, not missed infections.** ResNet18 separates the two classes more cleanly (higher AUC), so it only had to lower its threshold to 0.20 to reach 98% validation recall. SimpleCNN had to go all the way down to 0.073, and paid with 3.7× more false alarms.
-- **Small differences on one test set deserve caution.** 61 vs 49 missed infections, on 29 patients, is modest. The AUC and false-alarm gaps are larger and more convincing.
-- **The price:** 29× more parameters and about 4× slower. Speed measurements vary by a few percent between runs (one run measured 4,988 / 1,171 cells per second), but the ratio stays the same. Speed on a laptop *CPU*, which a clinic might have, has **not** been measured.
-- **Fine-tuning is where transfer learning pays off:** in the frozen stage, validation loss only reached 0.24; one epoch of fine-tuning took it to 0.11 (`results/resnet18_curves.png`, dashed line).
-- **Both models get the same cells "wrong".** Several of ResNet18's most confident mistakes are the very images SimpleCNN got wrong: "infected" cells with no visible parasite, and "healthy" cells with purple spots. Two very different models confidently disagreeing with the same labels makes label errors more plausible, though only an expert could confirm it.
+A second, pretrained model was built and compared with SimpleCNN in this phase, then removed from the project. SimpleCNN is the project's only model, so there is nothing from this phase left in the code.
 
 ---
 
@@ -355,7 +312,7 @@ A model that only says "infected, 97%" gives a doctor nothing to check. It might
 ### What Grad-CAM shows, and how
 **Analogy:** asking a student "which part of the picture made you say that?" and having them circle it.
 **How it works:**
-1. The last convolutional layer's feature maps say *where* each learned pattern appears (ResNet18: 512 maps of 7×7; SimpleCNN: 256 maps of 16×16).
+1. The last convolutional layer's feature maps say *where* each learned pattern appears (SimpleCNN: 256 maps of 16×16).
 2. The *gradient* of the model's answer with respect to each map says how much that map mattered for this answer.
 3. Add the maps together, weighted by how much they mattered, and keep the positive part. That gives a coarse heatmap, stretched to the image's size and laid over the cell. **Red = pushed the model towards its answer.**
 
@@ -364,39 +321,31 @@ A model that only says "infected, 97%" gives a doctor nothing to check. It might
 
 ### Explaining the model's own answer
 Each heatmap explains *what the model decided*: "why infected?" for cells it called infected, "why healthy?" for cells it called healthy. If we always asked "why infected?", a healthy cell would have almost no evidence anywhere. Grad-CAM scales every heatmap to 0..1, so that near-zero noise would be stretched into bright, misleading hot spots.
-**Where:** `compute_heatmaps(..., explain_labels)`; the labels come from the tuned thresholds in `results/<model>_metrics.json`, the same ones as Phase 5, not re-tuned.
+**Where:** `compute_heatmaps(..., explain_labels)`; the labels come from the tuned threshold in `results/simple_cnn_metrics.json`, the same ones as Phase 5, not re-tuned.
 
 ### A first sanity check (fake data)
-Even a barely-trained smoke-test ResNet18 lit up on the purple blob in most correctly caught "infected" cartoon cells. On a missed one, it had looked at the plain middle of the cell instead of the blob near the edge. That's the kind of reasoning Grad-CAM makes visible.
+Run `python -m src.gradcam --smoke-test` after a smoke-test training run. The heatmaps of a barely-trained model mean little, but the run proves every step works before using the real data.
 
-### What the real heatmaps showed (test set, `results/*_gradcam.png`)
-Before drawing them, both models were re-evaluated on the laptop with the downloaded images: thresholds, AUC, missed infections and false alarms matched the Kaggle results **exactly**. So these heatmaps explain the same decisions we reported.
+### What the real heatmaps showed (test set, `results/simple_cnn_gradcam.png`)
+Before drawing them, the model was re-evaluated on the laptop with the downloaded images: threshold, AUC, missed infections and false alarms matched the Kaggle results **exactly**. So these heatmaps explain the same decisions we reported.
 
-*(Corrected after a recheck: see "Lesson: check your explanations too" below.)*
-
-- **Correctly caught infections: the heat sits on the purple stained parasite**, for both models, in the examples shown. SimpleCNN's heatmaps are sharper (a 16×16 grid vs ResNet18's 7×7). One honest exception from the first run: a SimpleCNN cell called infected with p = 0.078 (only just above its very low 0.073 threshold) had its heat on a tiny speck at the image's corner, not on a clear parasite.
-- **"Why healthy?" heatmaps: trustworthy for SimpleCNN only.** SimpleCNN's spread over the body of the cell ("no spot anywhere"), and they pass the rotation check. ResNet18's do **not** pass it, so they're hidden (see below).
-- **False alarms: both models fire on purple spots** in cells labelled healthy. Whether those spots are a parasite the label missed, or a platelet or stain speck on a healthy cell, only an expert can say.
-- **Missed infections: there's no spot to find.** SimpleCNN's heat is spread over the cell, just as for truly healthy cells, and to the eye most of these "infected" cells show no clear parasite (one has faint marks in a pale centre).
-- **78 test cells fooled both models.** In 5 of the 6 shown, the label says infected but no clear parasite is visible; in the other, the label says healthy but two purple blobs are there. This makes **label errors** a likely explanation for part of the "mistakes", but it doesn't prove it.
-- **Practical note:** Grad-CAM for both models on the full test set, including the rotation check, takes about 15 to 20 minutes on the laptop.
+- **Correctly caught infections: the heat sits on the purple stained parasite**, in the examples shown. One honest exception from the first run: a cell called infected with p = 0.078 (only just above the very low 0.073 threshold) had its heat on a tiny speck at the image's corner, not on a clear parasite.
+- **"Why healthy?" heatmaps spread over the body of the cell** ("no spot anywhere"), and they pass the rotation check (see below).
+- **False alarms: the model fires on purple spots** in cells labelled healthy. Whether those spots are a parasite the label missed, or a platelet or stain speck on a healthy cell, only an expert can say.
+- **Missed infections: there's no spot to find.** The heat is spread over the cell, just as for truly healthy cells, and to the eye most of these "infected" cells show no clear parasite (one has faint marks in a pale centre). This makes **label errors** a possible explanation for part of the "mistakes", but it doesn't prove it.
 
 ### Lesson: check your explanations too (the rotation check)
-**What happened:** at first, I described some of ResNet18's "why healthy?" heatmaps as peaking at the picture's bottom-right corner, and guessed it might be a shortcut. A guess isn't good enough, so we tested it.
+**Why it's needed:** a heatmap always *looks* convincing. But Grad-CAM can light up a fixed spot of the picture (say, its bottom-right corner) for almost every cell, because of a quirk in how a model's layers process the picture. We saw exactly this with a larger model tried during the project (later dropped): its "why healthy?" heatmaps sat in one corner whatever the cell showed.
 **The test:** rotate each cell 180° and run Grad-CAM again. A heatmap that shows something *in the cell* turns with the cell. A heatmap that sits at a fixed spot *of the picture* doesn't.
-**The results** (agreement after rotating back: 1.0 = perfectly turns with the cell, 0 = unrelated), from `results/gradcam_checks.json`:
+**SimpleCNN's results** (agreement after rotating back: 1.0 = perfectly turns with the cell, 0 = unrelated), from `results/gradcam_checks.json`:
 
 | | "why infected?" | "why healthy?" |
 |---|---|---|
 | SimpleCNN | 0.96 ✓ | 0.93 ✓ |
-| ResNet18 | 0.97 ✓ | **0.07 ✗** |
 
-In a first test on 300 cells, 91% of ResNet18's "why healthy?" heatmaps peaked in the bottom-right quarter **whether the cell was rotated or not**.
-**What it means:**
-- It is **not** a shortcut in ResNet18's *decisions*: rotating cells changed its probabilities by only 0.018 on average (3 of 300 decisions changed).
-- It **is** a failure of the *explanation*. "Healthy" means "no parasite anywhere", so there's no single place to point to. Grad-CAM then falls back on a quirk of how ResNet18's strided layers process the picture, which favours one corner. Those heatmaps say nothing about the cell.
+Both pass, so both kinds of heatmap are shown.
 
-**The fix:** every kind of heatmap must now pass the rotation check (agreement ≥ 0.5, `GRADCAM_MIN_AGREEMENT` in `src/config.py`); failing ones are **hidden** in the figures, with a note saying why. **Where:** `src/gradcam.py` → `content_agreement()` and `rotation_check()`.
+**The rule:** every kind of heatmap must pass the rotation check (agreement ≥ 0.5, `GRADCAM_MIN_AGREEMENT` in `src/config.py`); failing ones are **hidden** in the figures, with a note saying why. **Where:** `src/gradcam.py` → `content_agreement()` and `rotation_check()`.
 **The bigger lesson:** an explanation method can be wrong too. Heatmaps look convincing whatever they show, so they need checking like any other result.
 
 ---
@@ -406,7 +355,7 @@ In a first test on 300 cells, 91% of ResNet18's "why healthy?" heatmaps peaked i
 ### Using the model: `predict.py`
 **What:** the step a user would actually run. Give it a cell image (or a folder), and get "Parasitized" or "Uninfected" plus the probability of infection.
 **Two details that matter:**
-- **The same preparation as in testing.** It uses exactly `build_eval_transform()` (resize + normalise, no augmentation). A test confirmed that `predict.py` gives *identical* probabilities to the evaluation code on 200 real test cells, for both models. Otherwise its answers wouldn't match the results we report.
+- **The same preparation as in testing.** It uses exactly `build_eval_transform()` (resize + normalise, no augmentation). A test confirmed that `predict.py` gives *identical* probabilities to the evaluation code on 200 real test cells. Otherwise its answers wouldn't match the results we report.
 - **The tuned threshold by default.** It reads the threshold chosen on validation in Phase 5 (`results/<model>_metrics.json`) and prints which threshold it used and why. `--threshold` overrides it.
 
 **Where:** `src/predict.py` → `predict_files()` (the work), `choose_threshold()`, `find_image_files()` (skips junk like `Thumbs.db`).

@@ -18,17 +18,15 @@ import torch
 
 from src import config, data, evaluate, gradcam, train
 from src.make_fake_data import create_fake_dataset
-from src.models import ResNet18Classifier, SimpleCNN
+from src.models import SimpleCNN
 from src.utils import set_seed
 
 CPU = torch.device("cpu")
 
 
-def test_target_layer_is_the_last_convolutional_stage() -> None:
+def test_target_layer_is_the_last_convolutional_block() -> None:
     simple_cnn = SimpleCNN()
-    resnet = ResNet18Classifier(pretrained=False)
     assert gradcam.target_layer_for(simple_cnn) is simple_cnn.block4.relu
-    assert gradcam.target_layer_for(resnet) is resnet.backbone.layer4
 
 
 def test_heatmaps_have_one_value_per_pixel_between_0_and_1() -> None:
@@ -53,23 +51,21 @@ def test_examples_are_sorted_into_the_right_groups() -> None:
     assert examples["false_alarm"].tolist() == [5, 4]   # most confidently wrong (highest p) first
 
 
-def test_gradcam_figures_are_made_for_both_models(tmp_path: Path) -> None:
-    """Train and evaluate both models for one epoch on fake data, then draw every figure."""
+def test_gradcam_figures_are_made(tmp_path: Path) -> None:
+    """Train and evaluate SimpleCNN for one epoch on fake data, then draw every figure."""
     set_seed(config.RANDOM_SEED)
     data_dir = tmp_path / "fake_data"
     output_dir = tmp_path / "outputs"
     create_fake_dataset(data_dir)
     split_table = data.split_by_patient(data.find_images(data_dir))
 
-    for model_name in ("simple_cnn", "resnet18"):
-        train.train_model(model_name, split_table, data_dir, output_dir, num_epochs=1, device=CPU, pretrained=False)
-        evaluate.evaluate_model(output_dir / f"{model_name}_best.pt", split_table, data_dir, output_dir, CPU)
+    train.train_model("simple_cnn", split_table, data_dir, output_dir, num_epochs=1, device=CPU)
+    evaluate.evaluate_model(output_dir / "simple_cnn_best.pt", split_table, data_dir, output_dir, CPU)
 
     saved = gradcam.run_gradcam(split_table, data_dir, output_dir, output_dir, output_dir, CPU)
 
     names = sorted(path.name for path in saved)
-    assert names == ["gradcam_checks.json", "resnet18_gradcam.png",
-                     "shared_mistakes_gradcam.png", "simple_cnn_gradcam.png"]
+    assert names == ["gradcam_checks.json", "simple_cnn_gradcam.png"]
     for path in saved:
         assert path.stat().st_size > 0
 
@@ -96,8 +92,8 @@ def test_heatmaps_that_turn_with_the_cell_pass_the_rotation_check() -> None:
 
 
 def test_heatmaps_stuck_in_one_corner_fail_the_rotation_check() -> None:
-    # The ResNet18 "healthy" problem: heat at the bottom-right corner of the
-    # picture, whether the cell is rotated or not.
+    # Heat at the bottom-right corner of the picture, whether the cell is
+    # rotated or not: it says nothing about the cell.
     original = np.stack([blob_at(5, 5)])
     of_rotated = np.stack([blob_at(5, 5)])
     agreement = gradcam.content_agreement(original, of_rotated)

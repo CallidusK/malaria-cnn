@@ -1,8 +1,0 @@
-{
-  "device": "Tesla T4",
-  "batch_size": 64,
-  "images_per_second": {
-    "simple_cnn": 5089.023743516007,
-    "resnet18": 1247.1261293673601
-  }
-}

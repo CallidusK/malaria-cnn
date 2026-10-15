@@ -79,7 +79,7 @@ You will not train on your laptop. Kaggle gives a free GPU and already hosts the
 |---|---|---|
 | **Python 3.10+** | The programming language of ML | Everything is written in it |
 | **PyTorch** | Deep learning library: tensors, layers, training | Builds and trains the CNN. Chosen because the training loop is written out explicitly, so you can read every step |
-| **torchvision** | PyTorch's add-on for images | Image transforms (resize, flip) and the pretrained ResNet18 model |
+| **torchvision** | PyTorch's add-on for images | Image transforms (resize, flip, rotate, normalise) |
 | **NumPy** | Fast number arrays | Basic maths on image data |
 | **pandas** | Spreadsheet-like tables in Python | Keeps the list of files, labels and patient IDs tidy |
 | **Pillow (PIL)** | Opens image files | Loads each `.png` |
@@ -112,7 +112,7 @@ malaria-cnn/
 │   ├── config.py              # All settings in one place (image size, epochs, paths...)
 │   ├── utils.py               # Seeds, device picking, small helpers
 │   ├── data.py                # Find files, split by patient, Dataset + DataLoaders, transforms
-│   ├── models.py              # SimpleCNN (ours) and ResNet18 (pretrained)
+│   ├── models.py              # SimpleCNN (ours)
 │   ├── train.py               # Training loop, validation, early stopping, checkpoints
 │   ├── evaluate.py            # Test metrics, confusion matrix, ROC, threshold tuning
 │   ├── gradcam.py             # Explainability heatmaps
@@ -190,7 +190,7 @@ Each phase lists: **Goal**, **What gets built**, **Key decisions**, **Concepts y
 **What gets built:** `src/data.py`:
 - `find_images(data_dir)` → a pandas table: `path, label, patient_id`, deduplicated, `.png` only.
 - `split_by_patient(table)` → train / val / test at roughly **70 / 15 / 15**, using scikit-learn's `StratifiedGroupKFold` so **no patient appears in two splits** *and* each split keeps a similar Parasitized/Uninfected balance (a plain `GroupShuffleSplit` can come out lopsided, because healthy patients only contribute Uninfected cells). Print class counts per split.
-- Save the split to **`splits.csv`** (`path, label, patient_id, split`) and reuse it in every later phase, so training, evaluation and the ResNet18 comparison all use exactly the same test patients.
+- Save the split to **`splits.csv`** (`path, label, patient_id, split`) and reuse it in every later phase, so training, evaluation and Grad-CAM all use exactly the same test patients.
 - `MalariaDataset` (a PyTorch `Dataset`) that loads one image and its label.
 - Transforms:
   - **Train:** resize → random horizontal + vertical flip → random rotation (cells have no "up", so rotating is free extra data) → mild colour jitter (stain colour varies between labs) → to tensor → normalise.
@@ -200,7 +200,7 @@ Each phase lists: **Goal**, **What gets built**, **Key decisions**, **Concepts y
 `tests/test_data.py`: runs on fake data; checks no patient overlap between splits, every split contains both classes, correct tensor shape, labels are 0/1.
 
 **Key decisions:**
-- Image size: **128×128** for our own CNN, **224×224** for ResNet18 (that's what it was pretrained on). Both live in `config.py`.
+- Image size: **128×128** for our own CNN. It lives in `config.py`.
 - Label encoding: `Uninfected = 0`, `Parasitized = 1` (so "positive" means "infected").
 
 **Concepts:** tensors, batches, train/validation/test sets and why there are three, data augmentation, normalisation.
@@ -292,24 +292,9 @@ In `src/train.py`, an **explicit** training loop (no high-level wrappers):
 
 ---
 
-### Phase 6: Transfer learning (ResNet18) and comparison
+### Phase 6: (dropped)
 
-**Goal:** see if a model pretrained on millions of everyday photos beats our from-scratch CNN.
-
-**What gets built:** in `src/models.py`, `build_resnet18(pretrained=True)`: load torchvision's ImageNet-pretrained ResNet18 and replace its last layer with `Linear(512 → 1)`.
-
-Training in two stages (both explained in comments):
-1. **Frozen:** freeze the pretrained layers, train only the new last layer for ~3 epochs.
-2. **Fine-tune:** unfreeze everything, train with a small learning rate (`1e-4`, AdamW) and early stopping.
-
-Uses 224×224 images and ImageNet normalisation values. Then a **comparison table** (`results/comparison.md`): parameters, training time, accuracy, recall, specificity, F1, AUC for both models.
-
-**Concepts:** transfer learning, pretrained weights, freezing layers, fine-tuning, why a smaller learning rate when fine-tuning.
-
-**Explain it back:**
-1. Why can a model trained on photos of dogs and cars help with blood cells?
-2. Why freeze first and unfreeze later?
-3. Which model would you give Biocon, and why? (Accuracy isn't the only factor: think size and speed.)
+This phase originally added a second, pretrained model and compared it with SimpleCNN. It was built, then removed from the project: SimpleCNN is the only model. Go straight from Phase 5 to Phase 7.
 
 ---
 
@@ -317,7 +302,7 @@ Uses 224×224 images and ImageNet normalisation values. Then a **comparison tabl
 
 **Goal:** prove the model looks at the **parasite**, not at random background.
 
-**What gets built:** `src/gradcam.py`: heatmap overlays for both models (last conv block of `SimpleCNN`, `layer4` of ResNet18). Save a grid: correct infected, correct healthy, and a few mistakes.
+**What gets built:** `src/gradcam.py`: heatmap overlays for the model (last conv block of `SimpleCNN`). Save a grid: correct infected, correct healthy, and a few mistakes.
 
 **Concepts:** why "black box" models are a problem in medicine, what Grad-CAM shows.
 
@@ -353,7 +338,7 @@ Pick any, only after Phase 8 is done:
 
 ## 7. What results to expect (and red flags)
 
-- A decent model on this dataset usually lands **around 95% accuracy or higher**, with ResNet18 typically a little ahead of the small CNN.
+- A decent model on this dataset usually lands **around 95% accuracy or higher**.
 - **Red flag: 99%+ accuracy.** On this dataset that often means leakage (same patient in train and test, or duplicate images). Our patient split exists to prevent exactly this. If it happens anyway, investigate before celebrating.
 - **Red flag:** training accuracy keeps rising while validation accuracy falls → overfitting. Early stopping and augmentation should handle it.
 - **Red flag:** loss stuck at ~0.69 from the start → the model is guessing 50/50; something in the data pipeline or labels is wrong.
@@ -375,7 +360,6 @@ Pick any, only after Phase 8 is done:
 | **Augmentation** | Randomly flipping/rotating training images to create variety |
 | **Recall / sensitivity** | Of all infected cells, the share we caught |
 | **Specificity** | Of all healthy cells, the share we correctly called healthy |
-| **Transfer learning** | Starting from a model already trained on another big dataset |
 
 ---
 

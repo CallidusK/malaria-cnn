@@ -8,21 +8,20 @@ A convolutional neural network (CNN) that looks at a microscope image of **one r
 
 ## Results at a glance
 
-Two models, tested **once** on **3,726 cells from 29 patients** that neither model ever trained on. The decision threshold was tuned on separate *validation* patients to catch at least 98% of infected cells, because **a missed infection is far worse than a false alarm**.
+**SimpleCNN**, a small CNN built from scratch, tested **once** on **3,726 cells from 29 patients** that it never trained on. The decision threshold was tuned on separate *validation* patients to catch at least 98% of infected cells, because **a missed infection is far worse than a false alarm**.
 
-| | SimpleCNN (built from scratch) | ResNet18 (pretrained, fine-tuned) |
-|---|---|---|
-| **Recall** (infected cells caught) | 96.36% | **97.08%** |
-| **Specificity** (healthy cells cleared) | 88.05% | **96.78%** |
-| Missed infections | 61 of 1,676 | **49** of 1,676 |
-| False alarms | 245 of 2,050 | **66** of 2,050 |
-| ROC-AUC | 0.9848 | **0.9944** |
-| Size of the weights | **1.6 MB** | 44.7 MB |
-| Speed (cells per second, Tesla T4 GPU) | **5,089** | 1,247 |
+| | SimpleCNN @ tuned threshold (0.073) |
+|---|---|
+| **Recall** (infected cells caught) | **96.36%** (1,615 of 1,676) |
+| **Specificity** (healthy cells cleared) | 88.05% (1,805 of 2,050) |
+| Missed infections | 61 of 1,676 |
+| False alarms | 245 of 2,050 |
+| ROC-AUC | 0.9848 |
+| Size of the weights | 1.6 MB (389,153 parameters) |
 
-**In one sentence:** ResNet18 catches slightly more infections and raises **3.7× fewer false alarms**, but it is 29× bigger and about 4× slower. Both models look at the purple stained parasite when they call a cell infected (see [Explainability](#explainability-where-do-the-models-look)).
+**In one sentence:** the model catches about 96 of every 100 infected cells, and when it calls a cell infected it looks at the purple stained parasite (see [Explainability](#explainability-where-does-the-model-look)).
 
-Full numbers: [`results/comparison.md`](results/comparison.md). All model results in this README come from the files in [`results/`](results/), produced by real Kaggle runs (and reproduced exactly on a laptop). Dataset facts come from [`notebooks/01_explore_data.ipynb`](notebooks/01_explore_data.ipynb), run on Kaggle.
+All model results in this README come from the files in [`results/`](results/), produced by a real Kaggle run (and reproduced exactly on a laptop). Dataset facts come from [`notebooks/01_explore_data.ipynb`](notebooks/01_explore_data.ipynb), run on Kaggle.
 
 ---
 
@@ -31,7 +30,7 @@ Full numbers: [`results/comparison.md`](results/comparison.md). All model result
 - [Dataset](#dataset)
 - [Approach](#approach)
 - [Results](#results)
-- [Explainability: where do the models look?](#explainability-where-do-the-models-look)
+- [Explainability: where does the model look?](#explainability-where-does-the-model-look)
 - [How to run it](#how-to-run-it)
 - [Trained weights](#trained-weights)
 - [Limitations](#limitations)
@@ -76,77 +75,64 @@ What we found when we checked it ([`notebooks/01_explore_data.ipynb`](notebooks/
 | Validation | 3,719 | 28 | choosing the best epoch and the threshold |
 | Test | 3,726 | 29 | measured **once**, at the end |
 
-**2. Two models**, both trained with an explicit PyTorch training loop (no high-level wrappers):
+**2. The model: SimpleCNN** ([`src/models.py`](src/models.py)), trained with an explicit PyTorch training loop (no high-level wrappers): 4 blocks of *convolution → BatchNorm → ReLU → max-pooling* (32 → 64 → 128 → 256 filters), global average pooling, dropout 0.3, one output. 128×128 input, 389,153 parameters. Adam (learning rate 1e-3).
 
-- **SimpleCNN** ([`src/models.py`](src/models.py)): 4 blocks of *convolution → BatchNorm → ReLU → max-pooling* (32 → 64 → 128 → 256 filters), global average pooling, dropout 0.3, one output. 128×128 input, 389,153 parameters. Adam (learning rate 1e-3).
-- **ResNet18** with **transfer learning**: pretrained on ImageNet (1.2 million everyday photos), last layer replaced by one output. 224×224 input, 11.2 million parameters. Trained in two stages: 3 epochs with the pretrained layers **frozen** (only the new last layer learns), then **fine-tuning** of everything with AdamW at a small learning rate (1e-4).
-
-Both use: data augmentation (flips, rotations of up to 180°, mild colour jitter) on training images only; binary cross-entropy loss; a learning-rate scheduler that halves the rate when validation loss stalls; and early stopping, keeping the epoch with the lowest validation loss.
+Training uses data augmentation (flips, rotations of up to 180°, mild colour jitter) on training images only; binary cross-entropy loss; a learning-rate scheduler that halves the rate when validation loss stalls; and early stopping, keeping the epoch with the lowest validation loss.
 
 **3. Honest evaluation** ([`src/evaluate.py`](src/evaluate.py)). On the *validation* set, choose the highest threshold that still catches at least 98% of infected cells. Then measure the *test* set at both the default threshold (0.5) and the tuned one. Nothing is ever chosen by looking at test results.
 
-**4. Explainability** ([`src/gradcam.py`](src/gradcam.py)): Grad-CAM heatmaps show where in the cell each model looked, and a *rotation check* tests whether each kind of heatmap can be trusted.
+**4. Explainability** ([`src/gradcam.py`](src/gradcam.py)): Grad-CAM heatmaps show where in the cell the model looked, and a *rotation check* tests whether each kind of heatmap can be trusted.
 
 ## Results
 
 ### Training
 
-| SimpleCNN: best epoch 17 of 21 | ResNet18: best epoch 20 of 24 (dashed line: fine-tuning starts) |
-|---|---|
-| ![SimpleCNN training curves](results/simple_cnn_curves.png) | ![ResNet18 training curves](results/resnet18_curves.png) |
+Best epoch 17 of 21; training took 12.5 minutes on a Tesla T4 GPU.
 
-Training and validation loss fall together, with no widening gap, so there is no sign of overfitting. Both runs were ended by early stopping. For ResNet18, one epoch of fine-tuning cut the validation loss from 0.24 to 0.11.
+![SimpleCNN training curves](results/simple_cnn_curves.png)
+
+Training and validation loss fall together, with no widening gap, so there is no sign of overfitting. The run was ended by early stopping.
 
 ### Test set: the threshold trade-off
 
-| | SimpleCNN @ 0.5 | SimpleCNN @ 0.073 (tuned) | ResNet18 @ 0.5 | ResNet18 @ 0.200 (tuned) |
-|---|---|---|---|---|
-| Accuracy | 95.57% | 91.79% | 96.83% | 96.91% |
-| Precision | 97.91% | 86.83% | 98.09% | 96.10% |
-| Recall | 92.12% | 96.36% | 94.81% | 97.08% |
-| Specificity | 98.39% | 88.05% | 98.49% | 96.78% |
-| F1 | 0.9493 | 0.9135 | 0.9642 | 0.9659 |
-| Missed infections | 132 | 61 | 87 | 49 |
-| False alarms | 33 | 245 | 31 | 66 |
-
-- **Lowering the threshold trades false alarms for caught infections.** For SimpleCNN it halved the missed infections (132 → 61), at the cost of about 7× more false alarms (33 → 245).
-- **ResNet18 pays a much smaller price.** It separates the two classes more cleanly (AUC 0.9944 vs 0.9848), so it only needed a threshold of 0.200 instead of 0.073 to reach the recall target.
-- **Test recall (96.36% and 97.08%) landed below the 98% target** that both models reached on validation (98.05%). That gap is the honest answer to "how does it do on *new* patients?", and we report it as it is.
-
-| SimpleCNN | ResNet18 |
-|---|---|
-| ![SimpleCNN confusion matrices](results/simple_cnn_confusion_matrices.png) | ![ResNet18 confusion matrices](results/resnet18_confusion_matrices.png) |
-| ![SimpleCNN ROC curve](results/simple_cnn_roc_curve.png) | ![ResNet18 ROC curve](results/resnet18_roc_curve.png) |
-
-### Which model?
-
-| | SimpleCNN | ResNet18 |
+| | SimpleCNN @ 0.5 (default) | SimpleCNN @ 0.073 (tuned) |
 |---|---|---|
-| For | 29× smaller (1.6 MB), about 4× faster, 2.6× quicker to train | fewer missed infections, **3.7× fewer false alarms**, higher AUC |
-| Against | 245 false alarms at the tuned threshold means a lot of re-checking | 44.7 MB; speed on a laptop **CPU** (a likely clinic setting) has not been measured |
+| Accuracy | 95.57% | 91.79% |
+| Precision | 97.91% | 86.83% |
+| Recall | 92.12% | 96.36% |
+| Specificity | 98.39% | 88.05% |
+| F1 | 0.9493 | 0.9135 |
+| Missed infections | 132 | 61 |
+| False alarms | 33 | 245 |
 
-## Explainability: where do the models look?
+- **Lowering the threshold trades false alarms for caught infections.** It halved the missed infections (132 → 61), at the cost of about 7× more false alarms (33 → 245).
+- **Test recall (96.36%) landed below the 98% target** that the model reached on validation (98.05%). That gap is the honest answer to "how does it do on *new* patients?", and we report it as it is.
+
+| Confusion matrices | ROC curve |
+|---|---|
+| ![SimpleCNN confusion matrices](results/simple_cnn_confusion_matrices.png) | ![SimpleCNN ROC curve](results/simple_cnn_roc_curve.png) |
+
+## Explainability: where does the model look?
 
 Grad-CAM produces a heatmap of the parts of the image that pushed the model towards its answer (red = strongest).
 
-**Can the heatmaps be trusted?** We tested them with a **rotation check**: rotate a cell 180°, and a heatmap that really shows something *in the cell* must turn with it. On 100 test cells per model and answer ([`results/gradcam_checks.json`](results/gradcam_checks.json); 1.0 = turns perfectly with the cell):
+**Can the heatmaps be trusted?** We tested them with a **rotation check**: rotate a cell 180°, and a heatmap that really shows something *in the cell* must turn with it. On 100 test cells per answer ([`results/gradcam_checks.json`](results/gradcam_checks.json); 1.0 = turns perfectly with the cell):
 
 | | "why infected?" | "why healthy?" |
 |---|---|---|
 | SimpleCNN | 0.96 ✓ | 0.93 ✓ |
-| ResNet18 | 0.97 ✓ | **0.07 ✗** (hidden in the figures) |
 
-ResNet18's "why healthy?" heatmaps light up the picture's bottom-right corner for almost every cell, rotated or not, so they say nothing about the cell. ResNet18's *decisions* are not affected: in a separate one-off check on 300 test cells, rotating them barely changed its predictions (details in [`docs/learning_notes.md`](docs/learning_notes.md), Phase 7). Only that kind of explanation is unreliable.
+Both kinds of heatmap pass, so both are shown.
 
-**What the trusted heatmaps show:**
-- **When a model calls a cell infected, it looks at the purple stained parasite.** That's what we'd hope for.
-- **False alarms:** both models fire on purple spots in cells *labelled* healthy.
+**What the heatmaps show:**
+- **When the model calls a cell infected, it looks at the purple stained parasite.** That's what we'd hope for.
+- **"Why healthy?"** heatmaps spread over the body of the cell: "no spot anywhere".
+- **False alarms:** the model fires on purple spots in cells *labelled* healthy.
 - **Missed infections:** most of these "infected" cells show no clear parasite at all.
-- **78 test cells fooled both models**, most of them cells whose label looks doubtful to the eye ([`results/shared_mistakes_gradcam.png`](results/shared_mistakes_gradcam.png)).
 
-![ResNet18 Grad-CAM](results/resnet18_gradcam.png)
+![SimpleCNN Grad-CAM](results/simple_cnn_gradcam.png)
 
-More: [`results/simple_cnn_gradcam.png`](results/simple_cnn_gradcam.png), [`results/simple_cnn_misclassified.png`](results/simple_cnn_misclassified.png), [`results/resnet18_misclassified.png`](results/resnet18_misclassified.png).
+More: [`results/simple_cnn_misclassified.png`](results/simple_cnn_misclassified.png).
 
 ## How to run it
 
@@ -166,10 +152,10 @@ Get the weights first (see [Trained weights](#trained-weights)), and put them in
 
 ```bash
 # One cell
-python -m src.predict --weights outputs/resnet18_best.pt --image my_cell.png
+python -m src.predict --weights outputs/simple_cnn_best.pt --image my_cell.png
 
 # A folder of cells, saved to a CSV file
-python -m src.predict --weights outputs/resnet18_best.pt --folder my_cells/ --output-csv predictions.csv
+python -m src.predict --weights outputs/simple_cnn_best.pt --folder my_cells/ --output-csv predictions.csv
 ```
 
 It uses the model's tuned threshold from `results/` (add `--threshold 0.5` to override), and prints the decision and the probability of infection for each image. Images should show **one** cell each, like the dataset's.
@@ -188,48 +174,46 @@ python -m src.evaluate --smoke-test
 
 1. Pack the committed code: `git archive --format=zip --prefix=malaria-cnn/ -o malaria-cnn-code.zip HEAD`
 2. On Kaggle: **Datasets → New Dataset**, upload the zip (private).
-3. Import [`notebooks/02_run_on_kaggle.ipynb`](notebooks/02_run_on_kaggle.ipynb) as a new notebook. Turn on **GPU** and **Internet** (for ResNet18's pretrained weights). **Add Input:** your code dataset and `cell-images-for-detecting-malaria`.
-4. Set `MODEL_NAME` (`"simple_cnn"` or `"resnet18"`) and **Run All**. It trains, evaluates, compares the models, and zips every output for download.
+3. Import [`notebooks/02_run_on_kaggle.ipynb`](notebooks/02_run_on_kaggle.ipynb) as a new notebook. Turn on **GPU**. **Add Input:** your code dataset and `cell-images-for-detecting-malaria`.
+4. **Run All**. It trains, evaluates, and zips every output for download.
 
-On a Tesla T4, training took 12.5 minutes (SimpleCNN) and 32.3 minutes (ResNet18).
+On a Tesla T4, training took 12.5 minutes.
 
 ### Grad-CAM (laptop, with the real data)
 
 Download the dataset from Kaggle and copy its `cell_images/Parasitized` and `cell_images/Uninfected` folders to `data/real/datasets/iarunava/cell-images-for-detecting-malaria/cell_images/`, so the paths in `splits/splits.csv` match. Then:
 
 ```bash
-python -m src.gradcam --data-dir data/real     # about 15 to 20 minutes on a laptop
+python -m src.gradcam --data-dir data/real
 ```
 
 ## Trained weights
 
-Model weights are not stored in the repository itself. They belong in a **GitHub Release**:
+Model weights are not stored in the repository itself. They are published as a **GitHub Release**: [`v1.0`](https://github.com/CallidusK/malaria-cnn/releases/tag/v1.0).
 
 | File | Size |
 |---|---|
 | `simple_cnn_best.pt` | 1.6 MB |
-| `resnet18_best.pt` | 44.8 MB |
 
-**To publish them** (repository owner): on the repository's GitHub page, go to **Releases → Draft a new release**, create a tag (e.g. `v1.0`), attach both `.pt` files from `outputs/`, and publish.
-
-**To use them:** download both files from the [releases page](https://github.com/CallidusK/malaria-cnn/releases) into `outputs/`.
+**To use it:** download it from the [releases page](https://github.com/CallidusK/malaria-cnn/releases) into `outputs/`.
 
 ## Limitations
 
 - **Single cells only.** The model needs images that each show one already-cut-out cell. A real smear image would first need a step that finds and crops every cell, which this project doesn't include.
 - **Cell-level, not patient-level.** A diagnosis is about a *patient*, who has thousands of cells; these scores are per cell.
-- **Possible label errors.** Several "missed infections" show no visible parasite, and several "false alarms" show clear purple spots. Both very different models confidently disagree with the same labels (78 shared mistakes). Some measured "errors" are likely labelling mistakes, but only an expert could confirm which. We did **not** remove or relabel anything.
-- **Small test set, in patients.** 29 test patients is enough for clear differences (false alarms: 245 vs 66) but not for small ones (missed infections: 61 vs 49).
-- **Recall on new patients missed the target.** The threshold reached 98% recall on validation patients, but 96.4% / 97.1% on test patients.
+- **Many false alarms at the tuned threshold.** Catching 96% of infections costs 245 false alarms out of 2,050 healthy cells, so a human would re-check a lot of cells.
+- **Possible label errors.** Several "missed infections" show no visible parasite, and several "false alarms" show clear purple spots. Some measured "errors" may be labelling mistakes, but only an expert could confirm which. We did **not** remove or relabel anything.
+- **Small test set, in patients.** 29 test patients is enough to see large effects, but small differences in the scores could be chance.
+- **Recall on new patients missed the target.** The threshold reached 98% recall on validation patients, but 96.4% on test patients.
 - **One dataset, one source.** All images come from one collection. Performance on slides from another lab, microscope or stain is unknown.
-- **Speed measured on a GPU only.** CPU speed (a likely clinic setting) wasn't measured.
-- **Explanations have limits.** ResNet18's "why healthy?" heatmaps failed the rotation check and can't be read. Even trusted heatmaps show *where* a model looked, not *why* that region mattered.
+- **Speed not measured.** How fast it runs on a laptop CPU (a likely clinic setting) is unknown.
+- **Explanations have limits.** Heatmaps show *where* the model looked, not *why* that region mattered.
 
 ## Future work
 
 - **Patient-level diagnosis:** combine the predictions for all of a patient's cells into one decision, and measure accuracy per patient.
-- **Expert review of disputed labels:** have a microscopist re-examine the cells both models disagree with.
-- **Smaller, faster models** (e.g. MobileNetV3 or EfficientNet-B0), with speed measured on a laptop CPU.
+- **Expert review of disputed labels:** have a microscopist re-examine the cells the model confidently disagrees with.
+- **Fewer false alarms:** try other architectures, or more training data, to separate the two classes more cleanly, and measure speed on a laptop CPU.
 - **External validation** on cells from a different dataset, such as BBBC041, to test how well the model transfers to other labs.
 - **A simple demo app** (e.g. Gradio): upload a cell image, see the prediction and its heatmap.
 
@@ -246,15 +230,14 @@ malaria-cnn/
 │   ├── utils.py                  random seeds, choosing CPU/GPU
 │   ├── make_fake_data.py         tiny fake dataset for local tests
 │   ├── data.py                   find images, remove duplicates, split by patient, DataLoaders
-│   ├── models.py                 SimpleCNN and ResNet18
-│   ├── train.py                  explicit training loop, early stopping, two-stage ResNet18
+│   ├── models.py                 SimpleCNN, our CNN
+│   ├── train.py                  explicit training loop, early stopping
 │   ├── evaluate.py               test metrics, threshold tuning, plots
-│   ├── compare.py                speed benchmark and model comparison table
 │   ├── gradcam.py                Grad-CAM heatmaps and the rotation check
 │   └── predict.py                classify images from the command line
 ├── notebooks/
 │   ├── 01_explore_data.ipynb     looking at the data first
-│   └── 02_run_on_kaggle.ipynb    training, evaluation and comparison on Kaggle
+│   └── 02_run_on_kaggle.ipynb    training and evaluation on Kaggle
 ├── tests/                        automatic checks (run with `pytest`)
 ├── splits/splits.csv             the saved train/val/test split
 ├── results/                      metrics, plots and heatmaps from the real runs

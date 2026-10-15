@@ -267,7 +267,7 @@ def load_or_create_splits(data_dir: Path, splits_csv: Path) -> pd.DataFrame:
     Load the train/val/test split from splits_csv if it exists; otherwise make it and save it.
 
     Saving the split means every later run (training today, evaluation next
-    week, the ResNet18 comparison) uses exactly the same test patients,
+    week, Grad-CAM) uses exactly the same test patients,
     even if a library version changes how "random" splitting works.
     """
     if splits_csv.exists():

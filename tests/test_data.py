@@ -162,10 +162,3 @@ def test_dataloader_batches_have_the_right_shape(fake_data_dir: Path, split_tabl
     assert images.shape == (batch_size, config.NUM_CHANNELS, image_size, image_size)  # (8, 3, 128, 128)
     assert labels.shape == (batch_size,)
     assert set(labels.tolist()) <= {0.0, 1.0}
-
-
-def test_resnet_image_size_works_too(fake_data_dir: Path, split_table: pd.DataFrame) -> None:
-    image_size = config.RESNET_IMAGE_SIZE
-    dataloaders = data.get_dataloaders(split_table, fake_data_dir, image_size, batch_size=4)
-    images, _ = next(iter(dataloaders["val"]))
-    assert images.shape == (4, config.NUM_CHANNELS, image_size, image_size)  # (4, 3, 224, 224)
