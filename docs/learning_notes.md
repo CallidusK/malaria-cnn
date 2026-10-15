@@ -281,3 +281,17 @@ If we tuned the threshold on the test set, the test score would be the best case
 **What:** a grid of misclassified test cells, the most confidently wrong first.
 **Why:** numbers tell you *how often* the model is wrong; pictures tell you *why*. Blurry images, odd stains or mislabelled cells all go into the README's "limitations".
 **Where:** `plot_misclassified()`.
+
+### What the real Phase 5 results showed (test set: 29 patients, 3,726 cells)
+| | threshold 0.5 | tuned 0.073 |
+|---|---|---|
+| missed infections | 132 | 61 |
+| false alarms | 33 | 245 |
+| recall | 92.1% | 96.4% |
+| specificity | 98.4% | 88.1% |
+
+ROC-AUC 0.985. Full numbers: `results/simple_cnn_metrics.json`.
+
+- **The trade-off, for real:** lowering the threshold halved the missed infections (132 → 61), at the cost of about 7× more false alarms (33 → 245). Accuracy *fell* (95.6% → 91.8%), even though the model became safer for patients. That's why accuracy is the wrong thing to optimise here.
+- **Validation doesn't transfer perfectly to new patients:** the threshold reached 98.05% recall on the validation patients, but 96.4% on the test patients. That gap is the honest answer to "how does it do on *new* people?". We report it as it is, and we must **not** lower the threshold further by looking at test results.
+- **Some "mistakes" may be label errors.** In `results/simple_cnn_misclassified.png`, many "missed infections" (labelled Parasitized) show no visible parasite, and several "false alarms" (labelled Uninfected) show purple stained spots. Those spots could be parasites, or platelets/stain debris on a healthy cell; it takes an expert to tell. Either way, we never edit the test set to fit the model. These go into the README's limitations.

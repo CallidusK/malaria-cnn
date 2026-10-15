@@ -1,0 +1,44 @@
+{
+  "model_name": "simple_cnn",
+  "checkpoint_epoch": 17,
+  "target_recall": 0.98,
+  "tuned_threshold": 0.07304788380861282,
+  "validation_at_tuned_threshold": {
+    "threshold": 0.07304788380861282,
+    "accuracy": 0.9349287442860984,
+    "precision": 0.8947635993899339,
+    "recall": 0.9805013927576601,
+    "specificity": 0.8924116424116424,
+    "f1": 0.9356725146198831,
+    "true_positives": 1760,
+    "false_negatives": 35,
+    "true_negatives": 1717,
+    "false_positives": 207
+  },
+  "test_at_default_threshold": {
+    "threshold": 0.5,
+    "accuracy": 0.9557165861513688,
+    "precision": 0.9790741915028536,
+    "recall": 0.9212410501193318,
+    "specificity": 0.9839024390243902,
+    "f1": 0.9492775899169998,
+    "true_positives": 1544,
+    "false_negatives": 132,
+    "true_negatives": 2017,
+    "false_positives": 33
+  },
+  "test_at_tuned_threshold": {
+    "threshold": 0.07304788380861282,
+    "accuracy": 0.9178743961352657,
+    "precision": 0.8682795698924731,
+    "recall": 0.9636038186157518,
+    "specificity": 0.8804878048780488,
+    "f1": 0.9134615384615384,
+    "true_positives": 1615,
+    "false_negatives": 61,
+    "true_negatives": 1805,
+    "false_positives": 245
+  },
+  "test_roc_auc": 0.9847875312882007,
+  "num_test_images": 3726
+}
