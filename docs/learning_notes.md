@@ -368,3 +368,14 @@ Each heatmap explains *what the model decided*: "why infected?" for cells it cal
 
 ### A first sanity check (fake data)
 Even a barely-trained smoke-test ResNet18 lit up on the purple blob in most correctly caught "infected" cartoon cells. On a missed one, it had looked at the plain middle of the cell instead of the blob near the edge. That's the kind of reasoning Grad-CAM makes visible.
+
+### What the real heatmaps showed (test set, `results/*_gradcam.png`)
+Before drawing them, both models were re-evaluated on the laptop with the downloaded images: thresholds, AUC, missed infections and false alarms matched the Kaggle results **exactly**. So these heatmaps explain the same decisions we reported.
+
+- **Correctly caught infections: both models look at the parasite.** The heat sits right on the purple stained spot, in every example shown. That's what we hoped for. SimpleCNN's heatmaps are sharper (a 16×16 grid vs ResNet18's 7×7), so its hot spots are tighter.
+- **Correctly cleared healthy cells:** the "why healthy?" evidence is spread over the body of the cell, which makes sense: "healthy" means "no spot anywhere".
+- **False alarms: both models fire on purple spots** in cells labelled healthy. The models are doing what they learned; the question is what those spots are: a parasite the label missed, or a platelet or stain speck sitting on a healthy cell. Only an expert can say.
+- **Missed infections: there's no spot to find.** The heat is spread over the cell, just as for truly healthy cells, and to the eye most of these "infected" cells show no visible parasite.
+- **78 test cells fooled both models.** In 5 of the 6 shown, the label says infected but no parasite is visible; in the other, the label says healthy but two purple blobs are clearly there. This makes **label errors** a likely explanation for part of the "mistakes", though it doesn't prove it.
+- **One thing to keep an eye on:** some of ResNet18's "why healthy?" heatmaps peak at the **bottom-right corner, partly on the black background**, which shouldn't carry any information. It's weak, and most of the heat stays on the cell, but it could be a small shortcut (or an effect of ResNet18's coarse 7×7 grid). It goes in the README's limitations.
+- **Practical note:** Grad-CAM for both models on the full test set took about 15 minutes on the laptop. Most of that is predicting all 3,726 cells to find the examples.
