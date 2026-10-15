@@ -342,7 +342,7 @@ Full table: `results/comparison.md` (rebuilt locally from the result files, and 
 - **The biggest win was false alarms, not missed infections.** ResNet18 separates the two classes more cleanly (higher AUC), so it only had to lower its threshold to 0.20 to reach 98% validation recall. SimpleCNN had to go all the way down to 0.073, and paid with 3.7× more false alarms.
 - **Small differences on one test set deserve caution.** 61 vs 49 missed infections, on 29 patients, is modest. The AUC and false-alarm gaps are larger and more convincing.
 - **The price:** 29× more parameters and about 4× slower. Speed measurements vary by a few percent between runs (one run measured 4,988 / 1,171 cells per second), but the ratio stays the same. Speed on a laptop *CPU*, which a clinic might have, has **not** been measured.
-- **Fine-tuning is where transfer learning pays off:** in the frozen stage, validation loss only reached about 0.24; one epoch of fine-tuning took it to about 0.10 (`results/resnet18_curves.png`, dashed line).
+- **Fine-tuning is where transfer learning pays off:** in the frozen stage, validation loss only reached 0.24; one epoch of fine-tuning took it to 0.11 (`results/resnet18_curves.png`, dashed line).
 - **Both models get the same cells "wrong".** Several of ResNet18's most confident mistakes are the very images SimpleCNN got wrong: "infected" cells with no visible parasite, and "healthy" cells with purple spots. Two very different models confidently disagreeing with the same labels makes label errors more plausible, though only an expert could confirm it.
 
 ---
@@ -398,3 +398,27 @@ In a first test on 300 cells, 91% of ResNet18's "why healthy?" heatmaps peaked i
 
 **The fix:** every kind of heatmap must now pass the rotation check (agreement ≥ 0.5, `GRADCAM_MIN_AGREEMENT` in `src/config.py`); failing ones are **hidden** in the figures, with a note saying why. **Where:** `src/gradcam.py` → `content_agreement()` and `rotation_check()`.
 **The bigger lesson:** an explanation method can be wrong too. Heatmaps look convincing whatever they show, so they need checking like any other result.
+
+---
+
+## Phase 8: Prediction script and README
+
+### Using the model: `predict.py`
+**What:** the step a user would actually run. Give it a cell image (or a folder), and get "Parasitized" or "Uninfected" plus the probability of infection.
+**Two details that matter:**
+- **The same preparation as in testing.** It uses exactly `build_eval_transform()` (resize + normalise, no augmentation). A test confirmed that `predict.py` gives *identical* probabilities to the evaluation code on 200 real test cells, for both models. Otherwise its answers wouldn't match the results we report.
+- **The tuned threshold by default.** It reads the threshold chosen on validation in Phase 5 (`results/<model>_metrics.json`) and prints which threshold it used and why. `--threshold` overrides it.
+
+**Where:** `src/predict.py` → `predict_files()` (the work), `choose_threshold()`, `find_image_files()` (skips junk like `Thumbs.db`).
+
+### Checking a README against the results
+**What:** every number in the README was copied from `results/`, then a script pulled out all 161 numbers and looked for each one in the result files.
+**What it caught:**
+- one number (0.018) that came from a one-off check rather than from `results/`, which made the README's line "every number comes from the result files" untrue. Both were reworded.
+- a rounding slip: "about 0.10" where the history file says 0.107 (rounded, 0.11).
+
+**Why bother:** a README is the only part of a project most people read. A wrong number there, even a small one, undermines trust in all the others.
+
+### Model weights and GitHub Releases
+**What:** trained weights (`outputs/*_best.pt`) are binary files that change completely with every training run. Git is built for text that changes a little at a time, so weights go into a **GitHub Release** (a downloadable attachment to a tagged version) instead of into the commit history.
+**Where:** `README.md` → "Trained weights", which has the steps to publish and to download them.

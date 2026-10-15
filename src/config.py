@@ -66,6 +66,10 @@ LABEL_PARASITIZED: int = 1
 # is junk and gets ignored.
 IMAGE_EXTENSION: str = ".png"
 
+# predict.py also accepts other common image formats, because new cell images
+# (e.g. from another microscope) may not be .png.
+PREDICT_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")
+
 # ---------------------------------------------------------------------------
 # Reproducibility
 # ---------------------------------------------------------------------------
